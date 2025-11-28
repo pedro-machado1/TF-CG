@@ -17,7 +17,7 @@ from PIL import Image
 import os
 
 class Labirinto3D:
-    def __init__(self, largura=1200, altura=800):
+    def __init__(self, largura=1240, altura=800):
         pygame.init()
         self.largura = largura
         self.altura = altura
@@ -84,10 +84,31 @@ class Labirinto3D:
         self.consumo_por_segundo = 1.0
         self.pontos = 0
 
+         # Escalas padrão para cada modelo TRI (ajuste conforme necessário)
+        self.escalas_modelos = {
+            'barrel': 0.01, #
+            'well': 0.007, #
+            'dead_tree_d': 0.005, # 
+            'pine_c': 0.004, #
+            'fountain_b': 0.0015, #
+            'fire_cage': 0.015, #
+            'box': 0.007, #
+            'fence': 0.01, #
+            'street_oil_light': 0.01, #
+            'default': 0.01  # escala padrão para modelos não especificados
+        }
+
         # Carregar modelos TRI
         self.carregarModeloTRI('TRI/barrel.tri', 'barrel')
-        self.carregarModeloTRI('TRI/banner.tri', 'banner')
-        self.carregarModeloTRI('TRI/tent_a.tri', 'tent_a')
+        self.carregarModeloTRI('TRI/well.tri', 'well')
+        self.carregarModeloTRI('TRI/dead_tree_d.tri', 'dead_tree_d')
+        self.carregarModeloTRI('TRI/pine_c.tri', 'pine_c')
+        self.carregarModeloTRI('TRI/fountain_b.tri', 'fountain_b')
+        self.carregarModeloTRI('TRI/fire_cage.tri', 'fire_cage')
+        self.carregarModeloTRI('TRI/box.tri', 'box')
+        self.carregarModeloTRI('TRI/fence.tri', 'fence')
+        self.carregarModeloTRI('TRI/street_oil_light.tri', 'street_oil_light')
+
 
         # Carregar mapa (isso pode definir self.posicao_jogador se o mapa tiver '3')
         self.carregarMapa("mapa_labirinto_texturas.txt")
@@ -105,7 +126,7 @@ class Labirinto3D:
             self.posicao_jogador = np.array([1.5, 0.0, 1.5], dtype=float)
 
         # Agora instancia inimigos/cápsulas respeitando a posição do jogador
-        self.instanciarInimigos(0)
+        self.instanciarInimigos(1)
         self.instanciarCapsulas(10)
 
         # Posição/rot. final do jogador (já garantida acima)
@@ -147,9 +168,9 @@ class Labirinto3D:
             if dist <= raio_captura:
                 # efeito da cápsula
                 antes = self.energia
-                ganho = 30
+                ganho = 40
                 self.energia = min(self.energia + ganho, self.energia_max)
-                self.pontos += 1
+                self.pontos += 3
                 print(f"[DEBUG] Cápsula idx={i} coletada: energia {antes} -> {self.energia} | pontos={self.pontos}")
 
                 # remover do mundo (não haverá mais colisão)
@@ -403,6 +424,7 @@ class Labirinto3D:
             inimigo['z'] = cel[1] + 0.5
 
     # --------------------- carregamento / criação de mapa ---------------------
+    # ...existing code...
     def carregarMapa(self, nome_arquivo):
         """Carrega o mapa do arquivo de texto, preservando as texturas definidas."""
         try:
@@ -417,6 +439,12 @@ class Labirinto3D:
             largura, altura = map(int, linhas_validas[0].split())
             self.mapa_largura = largura
             self.mapa_altura = altura
+
+            # Verifica se há linhas suficientes no arquivo para o mapa declarado
+            if len(linhas_validas) < 1 + self.mapa_altura:
+                print(f"[ERRO] Arquivo de mapa contém {len(linhas_validas)-1} linhas de mapa, esperado {self.mapa_altura}. Usando mapa padrão.")
+                self.criarMapaPadrao()
+                return
 
             self.mapa = []
             self.mapa_tipos_piso = []
@@ -451,7 +479,7 @@ class Labirinto3D:
                 linha_texturas = []
 
                 for x, val in enumerate(tokens):
-
+            # ...existing code...
                     # ----------------------------------------
                     # TIPO + TEXTURA (ex: "6:banner")
                     # ----------------------------------------
@@ -538,24 +566,33 @@ class Labirinto3D:
             print(f"Erro ao carregar mapa: {e}")
             self.criarMapaPadrao()
 
+    # ...existing code...
     def converterObjetosEstaticosParaTRI(self):
-        """Cria instâncias TRI dependendo do tipo definido no mapa."""
+        """Cria instâncias TRI dependendo do tipo definido no mapa, aplicando a escala correta."""
         self.objetos_tri = []
 
-        for obj in self.objetos_estaticos:
-            modelo = obj['tipo']  # usa o nome definido no mapa
+        # 1. Obter a escala padrão para usar como fallback
+        escala_default = self.escalas_modelos.get('default', 1.0) # 1.0 é um fallback seguro
 
-            # se o modelo não existe, ignora para evitar crash
+        for obj in self.objetos_estaticos:
+            modelo = obj['tipo']  # usa o nome definido no mapa (ex: 'barrel', 'banner')
+
+            # Se o modelo não existe nos modelos carregados, ignora.
             if modelo not in self.modelos_tri:
-                print(f"[AVISO] Modelo TRI '{modelo}' não carregado.")
+                print(f"[AVISO] Modelo TRI '{modelo}' não carregado. Ignorando.")
                 continue
 
+            # 2. Obter a escala específica para este modelo.
+            #    Se o modelo não estiver no dicionário, usa a escala padrão.
+            escala_aplicada = self.escalas_modelos.get(modelo, escala_default)
+
+            # 3. Adicionar o objeto à lista de renderização com a escala correta
             self.objetos_tri.append({
                 'modelo': modelo,
                 'x': obj['x'] + 0.5,
                 'y': 0.0,
                 'z': obj['y'] + 0.5,
-                'escala': 0.008
+                'escala': escala_aplicada  # <-- **Ajuste aqui: Usa a escala do dicionário**
             })
 
     def criarMapaPadrao(self):
@@ -780,7 +817,7 @@ class Labirinto3D:
                 quantidade_roubada = 20.0
                 roubado = min(self.energia, quantidade_roubada)
                 self.energia -= roubado
-                self.pontos -= 10
+                self.pontos -= 5
                 self.reposicionarInimigoAleatorio(inimigo)
                 continue
             if dist > 0.01:
@@ -845,36 +882,113 @@ class Labirinto3D:
         glEnd()
 
     def desenharJogador(self):
+        """
+        Desenha um personagem estilizado (humano/animal híbrido) em 3ª pessoa.
+        Usa formas simples (cilindros/esferas) para um visual limpo e facilmente ajustável.
+        """
+        # animação simples (bobbing)
+        t = pygame.time.get_ticks() / 1000.0
+        bob = math.sin(t * 3.0) * 0.04  # amplitude pequena
+
+        # posição e orientação do jogador
         glPushMatrix()
-        glTranslatef(self.posicao_jogador[0], self.posicao_jogador[1], self.posicao_jogador[2])
+        glTranslatef(self.posicao_jogador[0], self.posicao_jogador[1] + bob, self.posicao_jogador[2])
         glRotatef(self.angulo_rotacao, 0, 1, 0)
-        glColor3f(0.0, 0.5, 1.0)
-        glPushMatrix()
-        glTranslatef(0, 0.6, 0)
-        quad = GLUquadric()
-        gluCylinder(quad, 0.2, 0.2, 0.6, 16, 16)
-        glPopMatrix()
-        glColor3f(1.0, 0.2, 0.2)
-        glPushMatrix()
-        glTranslatef(0, 1.3, 0)
-        quad = GLUquadric()
-        gluSphere(quad, 0.25, 16, 16)
-        glPopMatrix()
-        glColor3f(0.0, 0.0, 0.0)
-        glPushMatrix()
-        glTranslatef(0, 1.35, 0.2)
-        quad = GLUquadric()
-        gluSphere(quad, 0.08, 8, 8)
-        glPopMatrix()
-        glColor3f(1.0, 1.0, 0.0)
-        glPushMatrix()
-        glTranslatef(0, 0.5, 0.4)
-        glRotatef(90, 1, 0, 0)
+
+        # QUADRIC reutilizável
         quad = gluNewQuadric()
         gluQuadricNormals(quad, GLU_SMOOTH)
-        gluQuadricTexture(quad, False)
-        gluCylinder(quad, 0.12, 0.0, 0.3, 16, 16)
+
+        # --- Perna esquerda ---
+        glPushMatrix()
+        glTranslatef(-0.18, 0.3, 0.0)      # posição do quadril esquerdo
+        glRotatef(-10, 1, 0, 0)
+        glColor3f(0.15, 0.15, 0.6)         # cor da roupa/pele
+        gluCylinder(quad, 0.09, 0.09, 0.55, 12, 4)
+        glTranslatef(0.0, 0.0, 0.55)
+        gluSphere(quad, 0.10, 10, 8)       # pé
         glPopMatrix()
+
+        # --- Perna direita ---
+        glPushMatrix()
+        glTranslatef(0.18, 0.3, 0.0)
+        glRotatef(-10, 1, 0, 0)
+        glColor3f(0.15, 0.15, 0.6)
+        gluCylinder(quad, 0.09, 0.09, 0.55, 12, 4)
+        glTranslatef(0.0, 0.0, 0.55)
+        gluSphere(quad, 0.10, 10, 8)
+        glPopMatrix()
+
+        # --- Tronco (torso) ---
+        glPushMatrix()
+        glTranslatef(0.0, 0.8, 0.0)
+        glRotatef(-90, 1, 0, 0)            # cilindro eixo Z->Y
+        glColor3f(0.2, 0.6, 0.9)           # camisa/pele
+        gluCylinder(quad, 0.32, 0.28, 0.7, 16, 4)
+        glPopMatrix()
+
+        # --- Cabeça ---
+        glPushMatrix()
+        glTranslatef(0.0, 1.6, 0.0)
+        glColor3f(1.0, 0.85, 0.7)          # tom de pele
+        gluSphere(quad, 0.28, 18, 16)
+        # olhos (pequenas esferas)
+        glPushMatrix()
+        glTranslatef(0.12, 0.05, 0.22)
+        glColor3f(0.0, 0.0, 0.0)
+        gluSphere(quad, 0.04, 8, 8)
+        glPopMatrix()
+        glPushMatrix()
+        glTranslatef(-0.12, 0.05, 0.22)
+        glColor3f(0.0, 0.0, 0.0)
+        gluSphere(quad, 0.04, 8, 8)
+        glPopMatrix()
+
+        # orelhas/orelha (dando um toque animal)
+        glPushMatrix()
+        glTranslatef(0.18, 0.26, 0.0)
+        glRotatef(-40, 0, 0, 1)
+        glColor3f(1.0, 0.85, 0.7)
+        gluCylinder(quad, 0.06, 0.0, 0.18, 10, 2)  # mini-cone (orelha)
+        glPopMatrix()
+        glPushMatrix()
+        glTranslatef(-0.18, 0.26, 0.0)
+        glRotatef(40, 0, 0, 1)
+        glColor3f(1.0, 0.85, 0.7)
+        gluCylinder(quad, 0.06, 0.0, 0.18, 10, 2)
+        glPopMatrix()
+
+        glPopMatrix()  # final cabeça & seus filhos
+
+        # --- Braço esquerdo (antebraço+mão) ---
+        glPushMatrix()
+        glTranslatef(-0.42, 1.05, 0.0)
+        glRotatef(10, 0, 0, 1)
+        glColor3f(0.15, 0.15, 0.6)
+        gluCylinder(quad, 0.07, 0.06, 0.45, 12, 4)
+        glTranslatef(0.0, 0.0, 0.45)
+        gluSphere(quad, 0.06, 8, 6)
+        glPopMatrix()
+
+        # --- Braço direito ---
+        glPushMatrix()
+        glTranslatef(0.42, 1.05, 0.0)
+        glRotatef(-10, 0, 0, 1)
+        glColor3f(0.15, 0.15, 0.6)
+        gluCylinder(quad, 0.07, 0.06, 0.45, 12, 4)
+        glTranslatef(0.0, 0.0, 0.45)
+        gluSphere(quad, 0.06, 8, 6)
+        glPopMatrix()
+
+        # --- Cauda curta (elemento animal) ---
+        glPushMatrix()
+        glTranslatef(0.0, 1.0, -0.34)
+        glRotatef(-55, 1, 0, 0)
+        glColor3f(0.15, 0.15, 0.15)
+        gluCylinder(quad, 0.05, 0.02, 0.4, 10, 2)
+        glPopMatrix()
+
+        # limpar
         glPopMatrix()
 
     def configurarPerspectiva(self):
@@ -903,7 +1017,7 @@ class Labirinto3D:
             else:
                 centro_x = self.mapa_largura / 2
                 centro_z = self.mapa_altura / 2
-                gluLookAt(centro_x, 15, centro_z + 10,
+                gluLookAt(centro_x, 80, centro_z + 5,
                           centro_x, 0, centro_z, 0, 1, 0)
 
     def procesarEventos(self):
