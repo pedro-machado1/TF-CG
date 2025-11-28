@@ -1,11 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Labirinto 3D com OpenGL
-Trabalho II - Fundamentos de Computação Gráfica
-Desenvolvido em Python com OpenGL
-"""
-
 from OpenGL.GL import *
 from OpenGL.GLU import *
 import pygame
@@ -14,6 +6,7 @@ import math
 import numpy as np
 from collections import deque
 from PIL import Image
+import random
 import os
 
 class Labirinto3D:
@@ -114,19 +107,12 @@ class Labirinto3D:
         
         # Carregar imagem de colisão
         self.carregarImagemMapaColisao("mapa_labirinto.txt")
-        
-        # Carregar modelos TRI
 
-        # Garantir que posicao_jogador exista (carregarMapa já define se tiver '3')
-        if not hasattr(self, 'posicao_jogador') or self.posicao_jogador is None:
-            self.posicao_jogador = np.array([1.5, 0.0, 1.5], dtype=float)
-
-        # Agora instancia inimigos/cápsulas respeitando a posição do jogador
+       
+        # instancia inimigos/cápsulas
         self.instanciarInimigos(1)
         self.instanciarCapsulas(10)
 
-        # Posição/rot. final do jogador (já garantida acima)
-        # self.posicao_jogador = np.array([1.5, 0.0, 1.5], dtype=float)  # removido (não sobrescrever)
 
         self.angulo_rotacao = 0.0
         self.velocidade_jogador = 8.0
@@ -139,48 +125,26 @@ class Labirinto3D:
         self.running = True
         self.tempo_anterior = 0
 
-        print(f"Jogador iniciado em: {self.posicao_jogador}")
-
-    # --------------------- captura de cápsulas (corrigida) ---------------------
     def verificarCapturaCapsulas(self):
-        """
-        Verifica e processa captura de cápsulas:
-         - itera de trás pra frente para poder remover elementos com segurança
-         - usa raio de captura razoável (ajustável)
-         - atualiza energia e pontos, remove cápsula da lista
-        """
+
         jogador_x = self.posicao_jogador[0]
         jogador_z = self.posicao_jogador[2]
 
-        raio_captura = 1  # <- ajuste aqui se quiser menor/maior
-
-        # iterar de trás para frente para permitir pop sem quebrar o loop
+        # de tras pra frente
         for i in range(len(self.capsulas) - 1, -1, -1):
             cap = self.capsulas[i]
             dx = jogador_x - cap["x"]
             dz = jogador_z - cap["z"]
             dist = math.hypot(dx, dz)
 
-            if dist <= raio_captura:
-                # efeito da cápsula
-                antes = self.energia
-                ganho = 40
+            if dist <= 1:
+                ganho = 50
                 self.energia = min(self.energia + ganho, self.energia_max)
                 self.pontos += 3
-                print(f"[DEBUG] Cápsula idx={i} coletada: energia {antes} -> {self.energia} | pontos={self.pontos}")
 
-                # remover do mundo (não haverá mais colisão)
-                # self.capsulas.pop(i)
-
-                # opcional: reposicionar ao invés de remover (comente pop e use reposicionarCapsula)
                 self.reposicionarCapsula(i)
 
-                # não retorna; permite coletar múltiplas cápsulas no mesmo frame
-        # fim verificarCapturaCapsulas
-
-    # --------------------- funções de instanciação e utilitários ---------------------
     def instanciarInimigos(self, quantidade):
-        import random
         self.inimigos = []
         livres = []
         jogador_cel = (int(self.posicao_jogador[0]), int(self.posicao_jogador[2]))
@@ -191,6 +155,7 @@ class Labirinto3D:
                     livres.append((x, y))
 
         caps = set((int(c['x']), int(c['z'])) for c in self.capsulas)
+        # livres
         livres = [p for p in livres if p not in caps]
 
         random.shuffle(livres)
@@ -203,26 +168,23 @@ class Labirinto3D:
                     'z': pos[1] + 0.5
                 })
 
-    def escolherCelulaLivreAleatoria(self):
-        import random
-        def _inner(avoid_positions=None):
+    def escolherCelulaLivreAleatoria(self, avoid_positions=None):
             livres = []
-            for yy in range(self.mapa_altura):
-                for xx in range(self.mapa_largura):
-                    if self.ehCelulaLivre(xx, yy):
-                        if avoid_positions and (xx, yy) in avoid_positions:
+            for y in range(self.mapa_altura):
+                for x in range(self.mapa_largura):
+                    if self.ehCelulaLivre(x, y):
+                        if avoid_positions and (x, y) in avoid_positions:
                             continue
-                        livres.append((xx, yy))
+                        livres.append((x, y))
             if not livres:
                 return None
             return random.choice(livres)
-        return _inner
 
     def instanciarCapsulas(self, quantidade):
-        import random
-        chooser = self.escolherCelulaLivreAleatoria()
+    
         while len(self.capsulas) < quantidade:
             avoid = set()
+
             jogador_cel = (int(self.posicao_jogador[0]), int(self.posicao_jogador[2]))
             avoid.add(jogador_cel)
 
@@ -232,7 +194,8 @@ class Labirinto3D:
             for inim in self.inimigos:
                 avoid.add((int(inim['x']), int(inim['z'])))
 
-            cel = chooser(avoid_positions=avoid)
+            cel = self.escolherCelulaLivreAleatoria(avoid_positions=avoid)
+
             if cel is None:
                 break
 
@@ -242,17 +205,16 @@ class Labirinto3D:
                 'z': cel[1] + 0.5
             })
 
+
     def carregarTexturasPiso(self):
         caminho_texturas = os.path.join(os.path.dirname(__file__), "TexturaAsfalto")
         
         for tipo_id, nome_arquivo in self.nomes_texturas.items():
             caminho_completo = os.path.join(caminho_texturas, nome_arquivo)
             
-            # Carregar imagem
             img = Image.open(caminho_completo).convert("RGBA")
             img_data = img.tobytes()
             
-            # Criar textura 
             textura_id = glGenTextures(1)
             glBindTexture(GL_TEXTURE_2D, textura_id)
             
@@ -263,13 +225,9 @@ class Labirinto3D:
         
             glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, img.width, img.height, 0, GL_RGBA, GL_UNSIGNED_BYTE, img_data)
             
-            # Armazenar ID da textura
             self.texturas_piso[tipo_id] = textura_id
-                
 
     def carregarImagemMapaColisao(self, nome_arquivo):
-    # Caminho completo do arquivo
-        caminho = os.path.join(os.path.dirname(__file__), nome_arquivo)
 
         # Se for um TXT → automaticamente usa o mapa textual
         if nome_arquivo.lower().endswith(".txt"):
@@ -353,43 +311,50 @@ class Labirinto3D:
             print(f"[ERRO] Falha ao carregar modelo TRI: {e}")
             return False
 
-    def reposicionarCapsula(self, idx):
-        """Move a cápsula de índice idx para outra célula livre aleatória"""
-        chooser = self.escolherCelulaLivreAleatoria()
-        # Evitar jogador, outras cápsulas e inimigos
+    def reposicionarCapsula(self, indice):
         avoid = set()
+
+        # evitar jogador
         jogador_cel = (int(self.posicao_jogador[0]), int(self.posicao_jogador[2]))
         avoid.add(jogador_cel)
-        for i, c in enumerate(self.capsulas):
-            if i == idx:
-                continue
-            avoid.add((int(c['x']), int(c['z'])))
-        for inim in self.inimigos:
-            avoid.add((int(inim['x']), int(inim['z'])))
 
-        cel = chooser(avoid_positions=avoid)
-        if cel:
-            self.capsulas[idx]['x'] = cel[0] + 0.5
-            self.capsulas[idx]['z'] = cel[1] + 0.5
-            return True
-        return False
-
-    def reposicionarInimigoAleatorio(self, inimigo):
-        chooser = self.escolherCelulaLivreAleatoria()
-        avoid = set()
-        jogador_cel = (int(self.posicao_jogador[0]), int(self.posicao_jogador[2]))
-        avoid.add(jogador_cel)
+        # evitar outras cápsulas
         for c in self.capsulas:
             avoid.add((int(c['x']), int(c['z'])))
+
+        # evitar inimigos
         for inim in self.inimigos:
-            if inim is inimigo:
-                continue
             avoid.add((int(inim['x']), int(inim['z'])))
 
-        cel = chooser(avoid_positions=avoid)
-        if cel:
-            inimigo['x'] = cel[0] + 0.5
-            inimigo['z'] = cel[1] + 0.5
+        # CHAMADA CORRETA
+        cel = self.escolherCelulaLivreAleatoria(avoid_positions=avoid)
+
+        if cel is None:
+            return
+
+        # reposiciona cápsula
+        self.capsulas[indice]['x'] = cel[0] + 0.5
+        self.capsulas[indice]['z'] = cel[1] + 0.5
+
+    def reposicionarInimigoAleatorio(self, inimigo):
+        avoid = set()
+
+        jogador_cel = (int(self.posicao_jogador[0]), int(self.posicao_jogador[2]))
+        avoid.add(jogador_cel)
+
+        for c in self.capsulas:
+            avoid.add((int(c['x']), int(c['z'])))
+
+        for inim in self.inimigos:
+            avoid.add((int(inim['x']), int(inim['z'])))
+
+        cel = self.escolherCelulaLivreAleatoria(avoid_positions=avoid)
+
+        if cel is None:
+            return
+
+        inimigo['x'] = cel[0] + 0.5
+        inimigo['z'] = cel[1] + 0.5
 
   
     def carregarMapa(self, nome_arquivo):
