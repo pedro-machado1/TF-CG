@@ -51,6 +51,10 @@ class Labirinto3D:
         self.objetos_estaticos = []
         self.capsulas = []
         
+        # Modelos TRI
+        self.modelos_tri = {}  # Dicionário: nome -> lista de triângulos
+        self.objetos_tri = []  # Lista de objetos TRI para renderizar
+        
         # Texturas do piso
         self.texturas_piso = {}  # Dicionário: tipo_piso -> ID_textura_OpenGL
         self.mapa_tipos_piso = []  # Armazena o tipo de textura para cada célula
@@ -68,6 +72,10 @@ class Labirinto3D:
             10: 'ULR.png',
             11: 'UR.png'
         }
+        
+        # Dados de colisão baseado em imagem
+        self.imagem_colisao = None
+        self.dados_colisao = None
 
         # Jogador: velocidade e energia
         self.velocidade_jogador = 10.0
@@ -76,11 +84,21 @@ class Labirinto3D:
         self.consumo_por_segundo = 1.0
         self.pontos = 0
 
+        # Carregar modelos TRI
+        self.carregarModeloTRI('TRI/barrel.tri', 'barrel')
+        self.carregarModeloTRI('TRI/banner.tri', 'banner')
+        self.carregarModeloTRI('TRI/tent_a.tri', 'tent_a')
+
         # Carregar mapa (isso pode definir self.posicao_jogador se o mapa tiver '3')
         self.carregarMapa("mapa_labirinto_texturas.txt")
         
         # Carregar texturas do piso
         self.carregarTexturasPiso()
+        
+        # Carregar imagem do mapa para colisão (usar como máscara)
+        self.carregarImagemMapaColisao("mapa_labirinto.txt")
+        
+        # Carregar modelos TRI
 
         # Garantir que posicao_jogador exista (carregarMapa já define se tiver '3')
         if not hasattr(self, 'posicao_jogador') or self.posicao_jogador is None:
@@ -135,10 +153,10 @@ class Labirinto3D:
                 print(f"[DEBUG] Cápsula idx={i} coletada: energia {antes} -> {self.energia} | pontos={self.pontos}")
 
                 # remover do mundo (não haverá mais colisão)
-                self.capsulas.pop(i)
+                # self.capsulas.pop(i)
 
                 # opcional: reposicionar ao invés de remover (comente pop e use reposicionarCapsula)
-                # self.reposicionarCapsula(i)
+                self.reposicionarCapsula(i)
 
                 # não retorna; permite coletar múltiplas cápsulas no mesmo frame
         # fim verificarCapturaCapsulas
@@ -247,6 +265,105 @@ class Labirinto3D:
             except Exception as e:
                 print(f"[ERRO] Falha ao carregar textura {nome_arquivo}: {e}")
 
+    def carregarImagemMapaColisao(self, nome_arquivo):
+        """Carrega a imagem do mapa para usar como máscara de colisão baseada em cores"""
+        try:
+            # Tenta carregar como arquivo de imagem primeiro
+            caminho_imagem = os.path.join(os.path.dirname(__file__), "mapa_labirinto_textura.png")
+            if os.path.exists(caminho_imagem):
+                self.imagem_colisao = Image.open(caminho_imagem)
+                self.dados_colisao = np.array(self.imagem_colisao.convert('RGBA'))
+                print(f"[OK] Imagem de colisão carregada: {caminho_imagem}")
+                return
+            else:
+                print("[AVISO] Imagem de colisão não encontrada. Usando mapa textual como base.")
+                # Usar o mapa de tipos de piso como referência
+                self.imagem_colisao = None
+                self.dados_colisao = None
+        except Exception as e:
+            print(f"[AVISO] Erro ao carregar imagem de colisão: {e}")
+            self.imagem_colisao = None
+            self.dados_colisao = None
+
+    def ehPassavel(self, pos_x, pos_z):
+        """
+        Verifica se a posição é passável baseado na imagem ou no mapa.
+        Retorna False se a posição é bloqueada (parede).
+        """
+        # Primeiro, verifica limites do mapa
+        celula_x = int(pos_x)
+        celula_z = int(pos_z)
+        
+        if celula_x < 0 or celula_x >= self.mapa_largura or celula_z < 0 or celula_z >= self.mapa_altura:
+            return False
+        
+        # Se temos uma imagem de colisão com dados
+        if self.dados_colisao is not None:
+            # Mapear posição 3D para pixel na imagem
+            img_height, img_width = self.dados_colisao.shape[:2]
+            
+            # Normalizar coordenadas para tamanho da imagem
+            pixel_x = int((pos_x / self.mapa_largura) * img_width)
+            pixel_z = int((pos_z / self.mapa_altura) * img_height)
+            
+            # Limpar limites de pixel
+            pixel_x = max(0, min(pixel_x, img_width - 1))
+            pixel_z = max(0, min(pixel_z, img_height - 1))
+            
+            # Verificar alfa (opacidade) - 0 = não passável, 255 = passável
+            alpha = self.dados_colisao[pixel_z, pixel_x, 3]
+            return alpha > 128  # Se opacidade > 50%, é passável
+        
+        # Fallback: usar o mapa de células
+        return self.ehCelulaLivre(celula_x, celula_z)
+
+    def carregarModeloTRI(self, caminho_arquivo, nome_modelo):
+        """Carrega um modelo TRI (formato de triângulos) do arquivo"""
+        try:
+            if not os.path.exists(caminho_arquivo):
+                print(f"[ERRO] Arquivo TRI não encontrado: {caminho_arquivo}")
+                return False
+            
+            triangulos = []
+            with open(caminho_arquivo, 'r') as f:
+                for linha in f:
+                    linha = linha.strip()
+                    if not linha:
+                        continue
+                    
+                    # Cada linha contém: x1 y1 z1  x2 y2 z2  x3 y3 z3  cor
+                    partes = linha.split()
+                    if len(partes) < 10:
+                        continue
+                    
+                    try:
+                        # Ler coordenadas dos 3 vértices
+                        v1 = [float(partes[0]), float(partes[1]), float(partes[2])]
+                        v2 = [float(partes[3]), float(partes[4]), float(partes[5])]
+                        v3 = [float(partes[6]), float(partes[7]), float(partes[8])]
+                        
+                        # Ler cor (em hex)
+                        cor_hex = partes[9] if len(partes) > 9 else "0xFFFFFF"
+                        cor_int = int(cor_hex, 16)
+                        r = ((cor_int >> 16) & 0xFF) / 255.0
+                        g = ((cor_int >> 8) & 0xFF) / 255.0
+                        b = (cor_int & 0xFF) / 255.0
+                        cor = [r, g, b]
+                        
+                        triangulos.append({
+                            'v1': v1, 'v2': v2, 'v3': v3, 'cor': cor
+                        })
+                    except:
+                        continue
+            
+            self.modelos_tri[nome_modelo] = triangulos
+            print(f"[OK] Modelo TRI carregado: {nome_modelo} ({len(triangulos)} triângulos)")
+            return True
+            
+        except Exception as e:
+            print(f"[ERRO] Falha ao carregar modelo TRI: {e}")
+            return False
+
     def reposicionarCapsula(self, idx):
         """Move a cápsula de índice idx para outra célula livre aleatória"""
         chooser = self.escolherCelulaLivreAleatoria()
@@ -289,84 +406,157 @@ class Labirinto3D:
     def carregarMapa(self, nome_arquivo):
         """Carrega o mapa do arquivo de texto, preservando as texturas definidas."""
         try:
-            with open(nome_arquivo, 'r') as f:
+            with open(nome_arquivo, 'r', encoding="utf-8") as f:
                 linhas = f.readlines()
-            linhas_validas = [l.strip() for l in linhas if l.strip() and not l.strip().startswith('#')]
-            dimensoes = linhas_validas[0].split()
-            self.mapa_largura = int(dimensoes[0])
-            self.mapa_altura = int(dimensoes[1])
+
+            # Remove comentários e linhas vazias
+            linhas_validas = [l.split("#")[0].strip() for l in linhas]
+            linhas_validas = [l for l in linhas_validas if l]
+
+            # Lê dimensões
+            largura, altura = map(int, linhas_validas[0].split())
+            self.mapa_largura = largura
+            self.mapa_altura = altura
+
             self.mapa = []
-            self.mapa_tipos_piso = [] 
-            posicao_inicial_encontrada = False
+            self.mapa_tipos_piso = []
             self.janelas = []
             self.portas = []
             self.objetos_estaticos = []
             self.capsulas = []
-            
+
+            posicao_inicial_encontrada = False
+
+            # ------------------------
+            # 💥 PARSER ROBUSTO 💥
+            # Normaliza cada linha do mapa
+            # ------------------------
+            def normalizar(linha):
+                linha = linha.replace("\t", " ")
+                while "  " in linha:
+                    linha = linha.replace("  ", " ")
+                return linha.strip()
+
+            # Processa linhas do mapa
             for y in range(self.mapa_altura):
-                linha = linhas_validas[y + 1].split()
+                linha_raw = normalizar(linhas_validas[y + 1])
+                tokens = linha_raw.split(" ")
+
+                # Debug se der errado
+                if len(tokens) != self.mapa_largura:
+                    print(f"[ERRO] Linha {y} tem {len(tokens)} itens, esperado {self.mapa_largura}")
+                    print("Linha:", linha_raw)
+
                 linha_mapa = []
                 linha_texturas = []
-                
-                for x, val in enumerate(linha):
-                    # 1. TENTA LER A TEXTURA DO ARQUIVO
-                    if ':' in val:
-                        tipo_celula, tipo_textura_str = val.split(':')
-                        tipo_celula = int(tipo_celula)
-                        tipo_textura = int(tipo_textura_str) # Usa a textura do arquivo
+
+                for x, val in enumerate(tokens):
+
+                    # ----------------------------------------
+                    # TIPO + TEXTURA (ex: "6:banner")
+                    # ----------------------------------------
+                    if ":" in val:
+                        tipo_str, textura_str = val.split(":")
+                        tipo_celula = int(tipo_str)
+                        tipo_textura = 5  # textura default se não converter
+                        try:
+                            tipo_textura = int(textura_str)
+                        except:
+                            pass
                     else:
                         tipo_celula = int(val)
-                        tipo_textura = 5  # Usa padrão APENAS se não houver definição
-                    
-                    # 2. PROCESSA O TIPO DE CÉLULA
-                    # (Removidos os "tipo_textura = 5" que causavam o bug)
-                    
+                        tipo_textura = 5  # padrão
+
+                    # ----------------------------------------
+                    # PROCESSAMENTO DAS CÉLULAS
+                    # ----------------------------------------
                     if tipo_celula == 3:
                         self.posicao_jogador = np.array([x + 0.5, 0.85, y + 0.5], dtype=float)
-                        linha_mapa.append(1) 
+                        linha_mapa.append(1)
                         posicao_inicial_encontrada = True
-                        print(f"Posição inicial encontrada em: ({x}, {y})")
-                        
-                    elif tipo_celula == 1 or tipo_celula == 2:
+
+                    elif tipo_celula in (1, 2):
                         linha_mapa.append(tipo_celula)
-                        
-                    elif tipo_celula == 4:
+
+                    elif tipo_celula == 4:  # janela
                         self.janelas.append({'x': x, 'y': y, 'altura': self.ALTURA_JANELA})
                         linha_mapa.append(1)
-                        
-                    elif tipo_celula == 5:
+
+                    elif tipo_celula == 5:  # porta
                         self.portas.append({'x': x, 'y': y, 'altura': self.ALTURA_PORTA})
                         linha_mapa.append(1)
-                        
-                    elif tipo_celula == 6:
-                        self.objetos_estaticos.append({'x': x, 'y': y, 'tipo': 'obj'})
+
+                    elif tipo_celula == 6:  # objeto estático
+                        modelo = None
+                        if ":" in val:
+                            _, modelo = val.split(":", 1)
+                            modelo = modelo.strip()
+
+                        if not modelo:
+                            print(f"[AVISO] Objeto estático sem modelo na célula ({x},{y})")
+                            modelo = "default"
+
+                        self.objetos_estaticos.append({
+                            'x': x,
+                            'y': y,
+                            'tipo': modelo
+                        })
                         linha_mapa.append(1)
-                        
-                    elif tipo_celula == 7:
+
+                    elif tipo_celula == 7:  # cápsula
                         self.capsulas.append({'x': x + 0.5, 'y': 0.0, 'z': y + 0.5})
-                        linha_mapa.append(1) # Converte para chão físico
-                        
+                        linha_mapa.append(1)
+
                     else:
                         linha_mapa.append(tipo_celula)
-                    
-                    # 3. GRAVA A TEXTURA FINAL (Seja a lida do arquivo ou a padrão)
+
                     linha_texturas.append(tipo_textura)
-                
+
                 self.mapa.append(linha_mapa)
                 self.mapa_tipos_piso.append(linha_texturas)
-            
+
+            # Caso não ache posição inicial
             if not posicao_inicial_encontrada:
                 print("Aviso: Nenhuma posição inicial (3) encontrada no mapa!")
                 self.posicao_jogador = np.array([1.5, 0.85, 1.5], dtype=float)
-                
+
             print(f"Mapa carregado: {self.mapa_largura}x{self.mapa_altura}")
+
+            print("DEBUG tamanho real do mapa:")
+            for i, linha in enumerate(self.mapa):
+                print(i, "tamanho:", len(linha))
+            print("Dimensões declaradas:", self.mapa_largura, "x", self.mapa_altura)
+
+            # Converte os objetos para TRI
+            self.converterObjetosEstaticosParaTRI()
 
         except FileNotFoundError:
             print(f"Erro: Arquivo {nome_arquivo} não encontrado!")
             self.criarMapaPadrao()
+
         except Exception as e:
             print(f"Erro ao carregar mapa: {e}")
             self.criarMapaPadrao()
+
+    def converterObjetosEstaticosParaTRI(self):
+        """Cria instâncias TRI dependendo do tipo definido no mapa."""
+        self.objetos_tri = []
+
+        for obj in self.objetos_estaticos:
+            modelo = obj['tipo']  # usa o nome definido no mapa
+
+            # se o modelo não existe, ignora para evitar crash
+            if modelo not in self.modelos_tri:
+                print(f"[AVISO] Modelo TRI '{modelo}' não carregado.")
+                continue
+
+            self.objetos_tri.append({
+                'modelo': modelo,
+                'x': obj['x'] + 0.5,
+                'y': 0.0,
+                'z': obj['y'] + 0.5,
+                'escala': 0.008
+            })
 
     def criarMapaPadrao(self):
         self.mapa_largura = 10
@@ -392,8 +582,9 @@ class Labirinto3D:
 
     # --------------------- colisões / movimentos / desenho (restante) ---------------------
     def ehCelulaLivre(self, x, y):
+        # Verifica se as coordenadas estão dentro dos limites do mapa
         if x < 0 or x >= self.mapa_largura or y < 0 or y >= self.mapa_altura:
-            return False
+            return False  # Retorna False se fora dos limites
         celula = self.mapa[int(y)][int(x)]
         return celula in [1, 2, 3]
 
@@ -409,10 +600,28 @@ class Labirinto3D:
         for px, pz in pontos:
             celula_x = int(px)
             celula_z = int(pz)
-            if not self.ehCelulaLivre(celula_x, celula_z):
+            
+            # 1. Verificar se há uma JANELA nesta célula (bloqueia)
+            eh_janela = any(janela['x'] == celula_x and janela['y'] == celula_z for janela in self.janelas)
+            if eh_janela:
                 return True
-        return False
 
+            # 2. Verificar se há um OBJETO ESTÁTICO nesta célula (bloqueia)
+            eh_objeto = any(obj['x'] == celula_x and obj['y'] == celula_z for obj in self.objetos_estaticos)
+            if eh_objeto:
+                return True
+            
+            # 3. Verificar se há uma PORTA nesta célula (passável)
+            eh_porta = any(porta['x'] == celula_x and porta['y'] == celula_z for porta in self.portas)
+            if eh_porta:
+                continue
+            
+            # 4. Verificar se é passável pela imagem/mapa (chão)
+            if not self.ehPassavel(px, pz):
+                return True
+        
+        return False
+    
     def atualizarMovimento(self, dt):
         if dt <= 0:
             return
@@ -532,9 +741,10 @@ class Labirinto3D:
         for porta in self.portas:
             self.desenharPorta(porta['x'], porta['y'], porta['altura'])
         
-        # Desenhar objetos estáticos
-        for obj in self.objetos_estaticos:
-            self.desenharObjetoEstatico(obj['x'], obj['y'])
+        # Desenhar modelos TRI (objetos estáticos + qualquer outro objeto TRI)
+        for obj_tri in self.objetos_tri:
+            self.desenharModeloTRI(obj_tri)
+        
         for cap in self.capsulas:
             self.desenharCapsula(cap)
         for inimigo in self.inimigos:
@@ -557,38 +767,8 @@ class Labirinto3D:
         glPopMatrix()
 
     def desenharObjetoEstatico(self, x, y):
-        cx = x + 0.5
-        cz = y + 0.5
-        glPushMatrix()
-        glTranslatef(cx, 0.0, cz)
-        glColor3f(0.6, 0.4, 0.2)
-        tamanho = 0.2
-        glBegin(GL_QUADS)
-        glVertex3f(-tamanho, 0.4, -tamanho)
-        glVertex3f(tamanho, 0.4, -tamanho)
-        glVertex3f(tamanho, 0.4, tamanho)
-        glVertex3f(-tamanho, 0.4, tamanho)
-        # Frente
-        glVertex3f(-tamanho, 0.0, -tamanho)
-        glVertex3f(tamanho, 0.0, -tamanho)
-        glVertex3f(tamanho, 0.4, -tamanho)
-        glVertex3f(-tamanho, 0.4, -tamanho)
-        # Costas
-        glVertex3f(tamanho, 0.0, tamanho)
-        glVertex3f(-tamanho, 0.0, tamanho)
-        glVertex3f(-tamanho, 0.4, tamanho)
-        glVertex3f(tamanho, 0.4, tamanho)
-        # Laterais
-        glVertex3f(-tamanho, 0.0, tamanho)
-        glVertex3f(-tamanho, 0.0, -tamanho)
-        glVertex3f(-tamanho, 0.4, -tamanho)
-        glVertex3f(-tamanho, 0.4, tamanho)
-        glVertex3f(tamanho, 0.0, -tamanho)
-        glVertex3f(tamanho, 0.0, tamanho)
-        glVertex3f(tamanho, 0.4, tamanho)
-        glVertex3f(tamanho, 0.4, -tamanho)
-        glEnd()
-        glPopMatrix()
+        """Nota: Objetos estáticos agora são renderizados como TRI models via desenharModeloTRI()"""
+        pass  # Todos os objetos estáticos foram adicionados à lista objetos_tri em converterObjetosEstaticosParaTRI()
 
     def atualizarInimigos(self, dt):
         velocidade = 20.0
@@ -750,6 +930,35 @@ class Labirinto3D:
             self.angulo_rotacao += 3
         if teclas[pygame.K_RIGHT]:
             self.angulo_rotacao -= 3
+
+    def desenharModeloTRI(self, obj_tri):
+        """Desenha um modelo TRI na posição e escala especificada"""
+        nome_modelo = obj_tri['modelo']
+        if nome_modelo not in self.modelos_tri:
+            return
+        
+        triangulos = self.modelos_tri[nome_modelo]
+        
+        glPushMatrix()
+        glTranslatef(obj_tri['x'], obj_tri['y'], obj_tri['z'])
+        glScalef(obj_tri['escala'], obj_tri['escala'], obj_tri['escala'])
+        
+        glBegin(GL_TRIANGLES)
+        for tri in triangulos:
+            # Vértice 1
+            glColor3f(*tri['cor'])
+            glVertex3f(tri['v1'][0], tri['v1'][1], tri['v1'][2])
+            
+            # Vértice 2
+            glColor3f(*tri['cor'])
+            glVertex3f(tri['v2'][0], tri['v2'][1], tri['v2'][2])
+            
+            # Vértice 3
+            glColor3f(*tri['cor'])
+            glVertex3f(tri['v3'][0], tri['v3'][1], tri['v3'][2])
+        glEnd()
+        
+        glPopMatrix()
 
     def desenharHUD(self):
         glMatrixMode(GL_PROJECTION)
