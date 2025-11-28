@@ -8,8 +8,14 @@ from Ponto import Ponto
 
 class Poligono:
     def __init__(self):
+        # vetor oficial de vértices
         self.Vertices = []
+        self.color = (1.0, 1.0, 1.0)
 
+    def addPoint(self, p: Ponto):
+        self.Vertices.append(p)
+
+    # Compatibilidade com seus métodos antigos
     def insereVertice(self, p):
         self.Vertices.append(p)
 
@@ -21,14 +27,27 @@ class Poligono:
     def getVertice(self, i):
         return self.Vertices[i]
 
+    # Desenha preenchido
     def pintaPoligono(self):
+        glColor3f(*self.color)
         glBegin(GL_POLYGON)
         for v in self.Vertices:
             glVertex3f(v.x, v.y, v.z)
         glEnd()
 
+    # Desenha linhas (wireframe)
     def desenhaPoligono(self):
+        glColor3f(*self.color)
         glBegin(GL_LINE_LOOP)
+        for v in self.Vertices:
+            glVertex3f(v.x, v.y, v.z)
+        glEnd()
+
+    # --- MÉTODO USADO PELO SEU LABIRINTO ---
+    def draw(self):
+        """Desenho compatível com o código do Labirinto."""
+        glColor3f(*self.color)
+        glBegin(GL_POLYGON)
         for v in self.Vertices:
             glVertex3f(v.x, v.y, v.z)
         glEnd()
@@ -62,28 +81,13 @@ class Poligono:
     def obtemMaximo(self, p1, p2):
         return Ponto(max(p1.x, p2.x), max(p1.y, p2.y), max(p1.z, p2.z))
 
-    def LePoligono(self, nome):
-        try:
-            with open(nome, 'r') as input_file:
-                print(f"Lendo arquivo {nome}...")
-                qtdVertices = int(input_file.readline())
-                for _ in range(qtdVertices):
-                    x, y, z = map(float, input_file.readline().split())
-                    self.insereVertice(Ponto(x, y))
-                print("Poligono lido com sucesso!")
-        except FileNotFoundError:
-            print(f"Erro ao abrir {nome}.")
-            sys.exit(0)
-
     def LePoligono3D(self, nome):
         try:
             with open(nome, 'r') as input_file:
-                print(f"Lendo arquivo {nome}...")
-                qtdVertices = int(input_file.readline())
-                for _ in range(qtdVertices):
+                qtd = int(input_file.readline())
+                for _ in range(qtd):
                     x, y, z = map(float, input_file.readline().split())
                     self.insereVertice(Ponto(x, y, z))
-                print("Poligono lido com sucesso!")
         except FileNotFoundError:
             print(f"Erro ao abrir {nome}.")
             sys.exit(0)
@@ -93,7 +97,6 @@ class Poligono:
         n1 = (n + 1) % len(self.Vertices)
         P2 = self.Vertices[n1]
         return P1, P2
-
 
     def desenhaAresta(self, n):
         P1, P2 = self.getAresta(n)
@@ -108,4 +111,3 @@ class Poligono:
     def imprimeVertices(self):
         for v in self.Vertices:
             v.imprime("", "\n")
-

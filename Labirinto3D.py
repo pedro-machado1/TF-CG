@@ -23,7 +23,6 @@ class Labirinto3D:
         self.altura = altura
         self.display = (largura, altura)
         self.clock = pygame.time.Clock()
-        self.fps = 60
 
         pygame.display.set_mode(self.display, DOUBLEBUF | OPENGL)
         pygame.display.set_caption("Labirinto 3D - Navegação")
@@ -52,12 +51,12 @@ class Labirinto3D:
         self.capsulas = []
         
         # Modelos TRI
-        self.modelos_tri = {}  # Dicionário: nome -> lista de triângulos
-        self.objetos_tri = []  # Lista de objetos TRI para renderizar
+        self.modelos_tri = {}  
+        self.objetos_tri = []  
         
         # Texturas do piso
-        self.texturas_piso = {}  # Dicionário: tipo_piso -> ID_textura_OpenGL
-        self.mapa_tipos_piso = []  # Armazena o tipo de textura para cada célula
+        self.texturas_piso = {}  
+        self.mapa_tipos_piso = []  
         self.nomes_texturas = {
             0: 'CROSS.png',
             1: 'DL.png',
@@ -73,29 +72,28 @@ class Labirinto3D:
             11: 'UR.png'
         }
         
-        # Dados de colisão baseado em imagem
+        # Dados de colisão 
         self.imagem_colisao = None
         self.dados_colisao = None
 
-        # Jogador: velocidade e energia
+        # Jogador
         self.velocidade_jogador = 10.0
         self.energia = 100.0
         self.energia_max = 100.0
         self.consumo_por_segundo = 1.0
         self.pontos = 0
 
-         # Escalas padrão para cada modelo TRI (ajuste conforme necessário)
+         # Escalas
         self.escalas_modelos = {
-            'barrel': 0.01, #
-            'well': 0.007, #
-            'dead_tree_d': 0.005, # 
-            'pine_c': 0.004, #
-            'fountain_b': 0.0015, #
-            'fire_cage': 0.015, #
-            'box': 0.007, #
-            'fence': 0.01, #
-            'street_oil_light': 0.01, #
-            'default': 0.01  # escala padrão para modelos não especificados
+            'barrel': 0.01, 
+            'well': 0.007, 
+            'dead_tree_d': 0.005, 
+            'pine_c': 0.004, 
+            'fountain_b': 0.0015, 
+            'fire_cage': 0.015, 
+            'box': 0.007, 
+            'fence': 0.01, 
+            'street_oil_light': 0.01
         }
 
         # Carregar modelos TRI
@@ -110,13 +108,11 @@ class Labirinto3D:
         self.carregarModeloTRI('TRI/street_oil_light.tri', 'street_oil_light')
 
 
-        # Carregar mapa (isso pode definir self.posicao_jogador se o mapa tiver '3')
+        # Carregar mapa
         self.carregarMapa("mapa_labirinto_texturas.txt")
-        
-        # Carregar texturas do piso
         self.carregarTexturasPiso()
         
-        # Carregar imagem do mapa para colisão (usar como máscara)
+        # Carregar imagem de colisão
         self.carregarImagemMapaColisao("mapa_labirinto.txt")
         
         # Carregar modelos TRI
@@ -247,70 +243,42 @@ class Labirinto3D:
             })
 
     def carregarTexturasPiso(self):
-        """Carrega as texturas PNG do diretório TexturaAsfalto/ para uso no piso"""
         caminho_texturas = os.path.join(os.path.dirname(__file__), "TexturaAsfalto")
-        
-        if not os.path.exists(caminho_texturas):
-            print(f"[AVISO] Diretório de texturas não encontrado: {caminho_texturas}")
-            return
         
         for tipo_id, nome_arquivo in self.nomes_texturas.items():
             caminho_completo = os.path.join(caminho_texturas, nome_arquivo)
             
-            if not os.path.exists(caminho_completo):
-                print(f"[AVISO] Arquivo de textura não encontrado: {caminho_completo}")
-                continue
+            # Carregar imagem
+            img = Image.open(caminho_completo).convert("RGBA")
+            img_data = img.tobytes()
             
-            try:
-                # Carregar imagem com PIL
-                img = Image.open(caminho_completo).convert("RGBA")
-                img_data = img.tobytes()
+            # Criar textura 
+            textura_id = glGenTextures(1)
+            glBindTexture(GL_TEXTURE_2D, textura_id)
+            
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT)
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT)
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR)
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
+        
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, img.width, img.height, 0, GL_RGBA, GL_UNSIGNED_BYTE, img_data)
+            
+            # Armazenar ID da textura
+            self.texturas_piso[tipo_id] = textura_id
                 
-                # Criar textura OpenGL
-                textura_id = glGenTextures(1)
-                glBindTexture(GL_TEXTURE_2D, textura_id)
-                
-                # Definir parâmetros de textura
-                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT)
-                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT)
-                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR)
-                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
-                
-                # Enviar dados da textura para GPU
-                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, img.width, img.height, 0, GL_RGBA, GL_UNSIGNED_BYTE, img_data)
-                
-                # Armazenar ID da textura
-                self.texturas_piso[tipo_id] = textura_id
-                print(f"[OK] Textura carregada: {nome_arquivo} (tipo {tipo_id})")
-                
-            except Exception as e:
-                print(f"[ERRO] Falha ao carregar textura {nome_arquivo}: {e}")
 
     def carregarImagemMapaColisao(self, nome_arquivo):
-        """Carrega a imagem do mapa para usar como máscara de colisão baseada em cores"""
-        try:
-            # Tenta carregar como arquivo de imagem primeiro
-            caminho_imagem = os.path.join(os.path.dirname(__file__), "mapa_labirinto_textura.png")
-            if os.path.exists(caminho_imagem):
-                self.imagem_colisao = Image.open(caminho_imagem)
-                self.dados_colisao = np.array(self.imagem_colisao.convert('RGBA'))
-                print(f"[OK] Imagem de colisão carregada: {caminho_imagem}")
-                return
-            else:
-                print("[AVISO] Imagem de colisão não encontrada. Usando mapa textual como base.")
-                # Usar o mapa de tipos de piso como referência
-                self.imagem_colisao = None
-                self.dados_colisao = None
-        except Exception as e:
-            print(f"[AVISO] Erro ao carregar imagem de colisão: {e}")
+    # Caminho completo do arquivo
+        caminho = os.path.join(os.path.dirname(__file__), nome_arquivo)
+
+        # Se for um TXT → automaticamente usa o mapa textual
+        if nome_arquivo.lower().endswith(".txt"):
             self.imagem_colisao = None
             self.dados_colisao = None
+            return
 
     def ehPassavel(self, pos_x, pos_z):
-        """
-        Verifica se a posição é passável baseado na imagem ou no mapa.
-        Retorna False se a posição é bloqueada (parede).
-        """
+        
         # Primeiro, verifica limites do mapa
         celula_x = int(pos_x)
         celula_z = int(pos_z)
@@ -423,42 +391,18 @@ class Labirinto3D:
             inimigo['x'] = cel[0] + 0.5
             inimigo['z'] = cel[1] + 0.5
 
-    # --------------------- carregamento / criação de mapa ---------------------
-    # ...existing code...
+  
     def carregarMapa(self, nome_arquivo):
-        """Carrega o mapa do arquivo de texto, preservando as texturas definidas."""
         try:
             with open(nome_arquivo, 'r', encoding="utf-8") as f:
                 linhas = f.readlines()
 
-            # Remove comentários e linhas vazias
-            linhas_validas = [l.split("#")[0].strip() for l in linhas]
-            linhas_validas = [l for l in linhas_validas if l]
-
-            # Lê dimensões
-            largura, altura = map(int, linhas_validas[0].split())
+            # le dimensões
+            largura, altura = map(int, linhas[0].split())
             self.mapa_largura = largura
             self.mapa_altura = altura
 
-            # Verifica se há linhas suficientes no arquivo para o mapa declarado
-            if len(linhas_validas) < 1 + self.mapa_altura:
-                print(f"[ERRO] Arquivo de mapa contém {len(linhas_validas)-1} linhas de mapa, esperado {self.mapa_altura}. Usando mapa padrão.")
-                self.criarMapaPadrao()
-                return
-
-            self.mapa = []
-            self.mapa_tipos_piso = []
-            self.janelas = []
-            self.portas = []
-            self.objetos_estaticos = []
-            self.capsulas = []
-
-            posicao_inicial_encontrada = False
-
-            # ------------------------
-            # 💥 PARSER ROBUSTO 💥
-            # Normaliza cada linha do mapa
-            # ------------------------
+            
             def normalizar(linha):
                 linha = linha.replace("\t", " ")
                 while "  " in linha:
@@ -467,41 +411,28 @@ class Labirinto3D:
 
             # Processa linhas do mapa
             for y in range(self.mapa_altura):
-                linha_raw = normalizar(linhas_validas[y + 1])
+                linha_raw = normalizar(linhas[y + 1])
                 tokens = linha_raw.split(" ")
 
-                # Debug se der errado
-                if len(tokens) != self.mapa_largura:
-                    print(f"[ERRO] Linha {y} tem {len(tokens)} itens, esperado {self.mapa_largura}")
-                    print("Linha:", linha_raw)
-
+                
                 linha_mapa = []
                 linha_texturas = []
 
                 for x, val in enumerate(tokens):
-            # ...existing code...
-                    # ----------------------------------------
-                    # TIPO + TEXTURA (ex: "6:banner")
-                    # ----------------------------------------
+            
                     if ":" in val:
                         tipo_str, textura_str = val.split(":")
                         tipo_celula = int(tipo_str)
-                        tipo_textura = 5  # textura default se não converter
                         try:
                             tipo_textura = int(textura_str)
                         except:
                             pass
                     else:
                         tipo_celula = int(val)
-                        tipo_textura = 5  # padrão
 
-                    # ----------------------------------------
-                    # PROCESSAMENTO DAS CÉLULAS
-                    # ----------------------------------------
                     if tipo_celula == 3:
                         self.posicao_jogador = np.array([x + 0.5, 0.85, y + 0.5], dtype=float)
                         linha_mapa.append(1)
-                        posicao_inicial_encontrada = True
 
                     elif tipo_celula in (1, 2):
                         linha_mapa.append(tipo_celula)
@@ -514,15 +445,11 @@ class Labirinto3D:
                         self.portas.append({'x': x, 'y': y, 'altura': self.ALTURA_PORTA})
                         linha_mapa.append(1)
 
-                    elif tipo_celula == 6:  # objeto estático
+                    elif tipo_celula == 6:  # objeto
                         modelo = None
                         if ":" in val:
                             _, modelo = val.split(":", 1)
                             modelo = modelo.strip()
-
-                        if not modelo:
-                            print(f"[AVISO] Objeto estático sem modelo na célula ({x},{y})")
-                            modelo = "default"
 
                         self.objetos_estaticos.append({
                             'x': x,
@@ -542,81 +469,39 @@ class Labirinto3D:
 
                 self.mapa.append(linha_mapa)
                 self.mapa_tipos_piso.append(linha_texturas)
-
-            # Caso não ache posição inicial
-            if not posicao_inicial_encontrada:
-                print("Aviso: Nenhuma posição inicial (3) encontrada no mapa!")
-                self.posicao_jogador = np.array([1.5, 0.85, 1.5], dtype=float)
-
+           
             print(f"Mapa carregado: {self.mapa_largura}x{self.mapa_altura}")
-
-            print("DEBUG tamanho real do mapa:")
-            for i, linha in enumerate(self.mapa):
-                print(i, "tamanho:", len(linha))
-            print("Dimensões declaradas:", self.mapa_largura, "x", self.mapa_altura)
 
             # Converte os objetos para TRI
             self.converterObjetosEstaticosParaTRI()
 
-        except FileNotFoundError:
-            print(f"Erro: Arquivo {nome_arquivo} não encontrado!")
-            self.criarMapaPadrao()
-
         except Exception as e:
             print(f"Erro ao carregar mapa: {e}")
-            self.criarMapaPadrao()
+            quit()
 
     # ...existing code...
     def converterObjetosEstaticosParaTRI(self):
-        """Cria instâncias TRI dependendo do tipo definido no mapa, aplicando a escala correta."""
         self.objetos_tri = []
 
-        # 1. Obter a escala padrão para usar como fallback
-        escala_default = self.escalas_modelos.get('default', 1.0) # 1.0 é um fallback seguro
-
         for obj in self.objetos_estaticos:
-            modelo = obj['tipo']  # usa o nome definido no mapa (ex: 'barrel', 'banner')
+            modelo = obj['tipo']  
 
-            # Se o modelo não existe nos modelos carregados, ignora.
+            # Se o modelo não existe 
             if modelo not in self.modelos_tri:
-                print(f"[AVISO] Modelo TRI '{modelo}' não carregado. Ignorando.")
+                print(f"Modelo TRI '{modelo}' não carregado")
                 continue
 
-            # 2. Obter a escala específica para este modelo.
-            #    Se o modelo não estiver no dicionário, usa a escala padrão.
-            escala_aplicada = self.escalas_modelos.get(modelo, escala_default)
+            escala = self.escalas_modelos.get(modelo, 1.0)
 
-            # 3. Adicionar o objeto à lista de renderização com a escala correta
             self.objetos_tri.append({
                 'modelo': modelo,
                 'x': obj['x'] + 0.5,
                 'y': 0.0,
                 'z': obj['y'] + 0.5,
-                'escala': escala_aplicada  # <-- **Ajuste aqui: Usa a escala do dicionário**
+                'escala': escala
             })
 
-    def criarMapaPadrao(self):
-        self.mapa_largura = 10
-        self.mapa_altura = 10
-        self.mapa = [
-            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-            [0, 3, 1, 1, 1, 0, 0, 0, 0, 0],
-            [0, 1, 0, 0, 1, 0, 0, 0, 0, 0],
-            [0, 1, 0, 0, 1, 1, 1, 1, 1, 0],
-            [0, 1, 0, 0, 0, 0, 0, 0, 1, 0],
-            [0, 1, 1, 1, 1, 0, 0, 0, 1, 0],
-            [0, 0, 0, 0, 1, 0, 0, 0, 1, 0],
-            [0, 0, 0, 0, 1, 0, 0, 0, 1, 0],
-            [0, 0, 0, 0, 1, 1, 1, 1, 1, 0],
-            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        ]
-        # Criar mapa de tipos de textura (5 = padrão)
-        self.mapa_tipos_piso = []
-        for y in range(self.mapa_altura):
-            linha_texturas = [5 if self.mapa[y][x] in [1, 2, 3] else 0 for x in range(self.mapa_largura)]
-            self.mapa_tipos_piso.append(linha_texturas)
-        self.posicao_jogador = np.array([1.5, 0.0, 1.5], dtype=float)
-
+    
     # --------------------- colisões / movimentos / desenho (restante) ---------------------
     def ehCelulaLivre(self, x, y):
         # Verifica se as coordenadas estão dentro dos limites do mapa
@@ -1131,7 +1016,7 @@ class Labirinto3D:
 
     def executar(self):
         print("\n=== LABIRINTO 3D ===")
-        print("Controles: BARRA - Avançar | ESQ/DIR - Girar | 1/2 - Câmera | ESC - Sair")
+        print("Controles: BARRA - Avançar | ESQ/DIR - Girar | 1/2/3 - Câmera | ESC - Sair")
         while self.running:
             self.procesarEventos()
             tempo_atual = pygame.time.get_ticks() / 1000.0
@@ -1149,7 +1034,7 @@ class Labirinto3D:
             self.desenharJogador()
             self.desenharHUD()
             pygame.display.flip()
-            self.clock.tick(self.fps)
+            self.clock.tick(60)
         pygame.quit()
         print("\nPrograma encerrado!")
 
