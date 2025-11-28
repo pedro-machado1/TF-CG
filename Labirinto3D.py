@@ -13,6 +13,8 @@ from pygame.locals import *
 import math
 import numpy as np
 from collections import deque
+from PIL import Image
+import os
 
 class Labirinto3D:
     def __init__(self, largura=1200, altura=800):
@@ -48,6 +50,24 @@ class Labirinto3D:
         self.inimigos = []
         self.objetos_estaticos = []
         self.capsulas = []
+        
+        # Texturas do piso
+        self.texturas_piso = {}  # Dicionário: tipo_piso -> ID_textura_OpenGL
+        self.mapa_tipos_piso = []  # Armazena o tipo de textura para cada célula
+        self.nomes_texturas = {
+            0: 'CROSS.png',
+            1: 'DL.png',
+            2: 'DLR.png',
+            3: 'DR.png',
+            4: 'LR.png',
+            5: 'None.png',
+            6: 'UD.png',
+            7: 'UDL.png',
+            8: 'UDR.png',
+            9: 'UL.png',
+            10: 'ULR.png',
+            11: 'UR.png'
+        }
 
         # Jogador: velocidade e energia
         self.velocidade_jogador = 10.0
@@ -57,7 +77,10 @@ class Labirinto3D:
         self.pontos = 0
 
         # Carregar mapa (isso pode definir self.posicao_jogador se o mapa tiver '3')
-        self.carregarMapa("mapa_labirinto.txt")
+        self.carregarMapa("mapa_labirinto_texturas.txt")
+        
+        # Carregar texturas do piso
+        self.carregarTexturasPiso()
 
         # Garantir que posicao_jogador exista (carregarMapa já define se tiver '3')
         if not hasattr(self, 'posicao_jogador') or self.posicao_jogador is None:
@@ -184,6 +207,46 @@ class Labirinto3D:
                 'z': cel[1] + 0.5
             })
 
+    def carregarTexturasPiso(self):
+        """Carrega as texturas PNG do diretório TexturaAsfalto/ para uso no piso"""
+        caminho_texturas = os.path.join(os.path.dirname(__file__), "TexturaAsfalto")
+        
+        if not os.path.exists(caminho_texturas):
+            print(f"[AVISO] Diretório de texturas não encontrado: {caminho_texturas}")
+            return
+        
+        for tipo_id, nome_arquivo in self.nomes_texturas.items():
+            caminho_completo = os.path.join(caminho_texturas, nome_arquivo)
+            
+            if not os.path.exists(caminho_completo):
+                print(f"[AVISO] Arquivo de textura não encontrado: {caminho_completo}")
+                continue
+            
+            try:
+                # Carregar imagem com PIL
+                img = Image.open(caminho_completo).convert("RGBA")
+                img_data = img.tobytes()
+                
+                # Criar textura OpenGL
+                textura_id = glGenTextures(1)
+                glBindTexture(GL_TEXTURE_2D, textura_id)
+                
+                # Definir parâmetros de textura
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT)
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT)
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR)
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
+                
+                # Enviar dados da textura para GPU
+                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, img.width, img.height, 0, GL_RGBA, GL_UNSIGNED_BYTE, img_data)
+                
+                # Armazenar ID da textura
+                self.texturas_piso[tipo_id] = textura_id
+                print(f"[OK] Textura carregada: {nome_arquivo} (tipo {tipo_id})")
+                
+            except Exception as e:
+                print(f"[ERRO] Falha ao carregar textura {nome_arquivo}: {e}")
+
     def reposicionarCapsula(self, idx):
         """Move a cápsula de índice idx para outra célula livre aleatória"""
         chooser = self.escolherCelulaLivreAleatoria()
@@ -224,7 +287,7 @@ class Labirinto3D:
 
     # --------------------- carregamento / criação de mapa ---------------------
     def carregarMapa(self, nome_arquivo):
-        """Carrega o mapa do arquivo de texto, incluindo janelas e portas"""
+        """Carrega o mapa do arquivo de texto, preservando as texturas definidas."""
         try:
             with open(nome_arquivo, 'r') as f:
                 linhas = f.readlines()
@@ -233,39 +296,71 @@ class Labirinto3D:
             self.mapa_largura = int(dimensoes[0])
             self.mapa_altura = int(dimensoes[1])
             self.mapa = []
+            self.mapa_tipos_piso = [] 
             posicao_inicial_encontrada = False
             self.janelas = []
             self.portas = []
             self.objetos_estaticos = []
             self.capsulas = []
+            
             for y in range(self.mapa_altura):
                 linha = linhas_validas[y + 1].split()
                 linha_mapa = []
+                linha_texturas = []
+                
                 for x, val in enumerate(linha):
-                    v = int(val)
-                    linha_mapa.append(v)
-                    if v == 3:
+                    # 1. TENTA LER A TEXTURA DO ARQUIVO
+                    if ':' in val:
+                        tipo_celula, tipo_textura_str = val.split(':')
+                        tipo_celula = int(tipo_celula)
+                        tipo_textura = int(tipo_textura_str) # Usa a textura do arquivo
+                    else:
+                        tipo_celula = int(val)
+                        tipo_textura = 5  # Usa padrão APENAS se não houver definição
+                    
+                    # 2. PROCESSA O TIPO DE CÉLULA
+                    # (Removidos os "tipo_textura = 5" que causavam o bug)
+                    
+                    if tipo_celula == 3:
                         self.posicao_jogador = np.array([x + 0.5, 0.85, y + 0.5], dtype=float)
-                        linha_mapa[-1] = 1  # Converter para corredor
+                        linha_mapa.append(1) 
                         posicao_inicial_encontrada = True
-                        print(f"Posição inicial encontrada em: ({x}, {y}) -> {self.posicao_jogador}")
-                    elif v == 4:
+                        print(f"Posição inicial encontrada em: ({x}, {y})")
+                        
+                    elif tipo_celula == 1 or tipo_celula == 2:
+                        linha_mapa.append(tipo_celula)
+                        
+                    elif tipo_celula == 4:
                         self.janelas.append({'x': x, 'y': y, 'altura': self.ALTURA_JANELA})
-                    elif v == 5:
+                        linha_mapa.append(1)
+                        
+                    elif tipo_celula == 5:
                         self.portas.append({'x': x, 'y': y, 'altura': self.ALTURA_PORTA})
-                    elif v == 6:
+                        linha_mapa.append(1)
+                        
+                    elif tipo_celula == 6:
                         self.objetos_estaticos.append({'x': x, 'y': y, 'tipo': 'obj'})
-                    elif v == 7:
+                        linha_mapa.append(1)
+                        
+                    elif tipo_celula == 7:
                         self.capsulas.append({'x': x + 0.5, 'y': 0.0, 'z': y + 0.5})
-                        linha_mapa[-1] = 1  # Converte a célula 7 (cápsula) em 1 (chão) no mapa físico
+                        linha_mapa.append(1) # Converte para chão físico
+                        
+                    else:
+                        linha_mapa.append(tipo_celula)
+                    
+                    # 3. GRAVA A TEXTURA FINAL (Seja a lida do arquivo ou a padrão)
+                    linha_texturas.append(tipo_textura)
+                
                 self.mapa.append(linha_mapa)
+                self.mapa_tipos_piso.append(linha_texturas)
+            
             if not posicao_inicial_encontrada:
                 print("Aviso: Nenhuma posição inicial (3) encontrada no mapa!")
-                # criarMapaPadrao ou definir posição padrão
-                # neste ponto apenas definiremos posição padrão, criarMapaPadrao é fallback
                 self.posicao_jogador = np.array([1.5, 0.85, 1.5], dtype=float)
+                
             print(f"Mapa carregado: {self.mapa_largura}x{self.mapa_altura}")
-            print(f"Janelas encontradas: {len(self.janelas)} | Portas encontradas: {len(self.portas)}")
+
         except FileNotFoundError:
             print(f"Erro: Arquivo {nome_arquivo} não encontrado!")
             self.criarMapaPadrao()
@@ -288,6 +383,11 @@ class Labirinto3D:
             [0, 0, 0, 0, 1, 1, 1, 1, 1, 0],
             [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
         ]
+        # Criar mapa de tipos de textura (5 = padrão)
+        self.mapa_tipos_piso = []
+        for y in range(self.mapa_altura):
+            linha_texturas = [5 if self.mapa[y][x] in [1, 2, 3] else 0 for x in range(self.mapa_largura)]
+            self.mapa_tipos_piso.append(linha_texturas)
         self.posicao_jogador = np.array([1.5, 0.0, 1.5], dtype=float)
 
     # --------------------- colisões / movimentos / desenho (restante) ---------------------
@@ -335,6 +435,49 @@ class Labirinto3D:
             self.posicao_jogador[0] = nova_x
             self.posicao_jogador[2] = nova_z
 
+    def desenharPisoComTexturas(self):
+        """Desenha o piso de cada célula livre com textura correspondente"""
+        glEnable(GL_TEXTURE_2D)
+        glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE)
+        
+        for y in range(self.mapa_altura):
+            for x in range(self.mapa_largura):
+                # Desenhar apenas célula livre (corredor ou sala)
+                if not self.ehCelulaLivre(x, y):
+                    continue
+                
+                # Obter tipo de textura para esta célula
+                tipo_texto = self.mapa_tipos_piso[y][x] if y < len(self.mapa_tipos_piso) and x < len(self.mapa_tipos_piso[y]) else 5
+                
+                # Obter ID da textura OpenGL
+                textura_id = self.texturas_piso.get(tipo_texto, None)
+                
+                # Sempre habilitar e fazer bind da textura antes de desenhar
+                if textura_id is not None:
+                    glBindTexture(GL_TEXTURE_2D, textura_id)
+                    glEnable(GL_TEXTURE_2D)
+                    glColor3f(1.0, 1.0, 1.0)  # Branco (não modula cor)
+                else:
+                    # Fallback: desenhar sem textura em cinza
+                    glDisable(GL_TEXTURE_2D)
+                    glColor3f(0.5, 0.5, 0.5)
+                
+                # Desenhar quadrado (célula) no plano XZ (altura Y = 0)
+                cx = x + 0.5
+                cz = y + 0.5
+                tamanho = self.TAMANHO_CELULA / 2.0
+                
+                glBegin(GL_QUADS)
+                # Textura: (0,0) no canto inferior-esquerdo, (1,1) no canto superior-direito
+                glTexCoord2f(0.0, 0.0); glVertex3f(cx - tamanho, 0.01, cz - tamanho)
+                glTexCoord2f(1.0, 0.0); glVertex3f(cx + tamanho, 0.01, cz - tamanho)
+                glTexCoord2f(1.0, 1.0); glVertex3f(cx + tamanho, 0.01, cz + tamanho)
+                glTexCoord2f(0.0, 1.0); glVertex3f(cx - tamanho, 0.01, cz + tamanho)
+                glEnd()
+        
+        glDisable(GL_TEXTURE_2D)
+        glColor3f(1.0, 1.0, 1.0)  # Resetar cor
+
     def desenharParede(self, x, z, altura, espessura, face_norte=True, face_sul=True,
                        face_leste=True, face_oeste=True):
         cx = x + 0.5
@@ -372,21 +515,24 @@ class Labirinto3D:
             glEnd()
 
     def desenharLabirinto(self):
-        glColor3f(0.5, 0.5, 0.5)
-        glBegin(GL_QUADS)
-        glVertex3f(0, -0.1, 0)
-        glVertex3f(self.mapa_largura, -0.1, 0)
-        glVertex3f(self.mapa_largura, -0.1, self.mapa_altura)
-        glVertex3f(0, -0.1, self.mapa_altura)
-        glEnd()
+        # Desenhar piso com texturas
+        self.desenharPisoComTexturas()
+        
+        # Desenhar paredes
         for y in range(self.mapa_altura):
             for x in range(self.mapa_largura):
                 if self.mapa[y][x] == 0:
                     self.desenharParede(x, y, self.ALTURA_PAREDE, self.ESPESSURA_PAREDE)
+        
+        # Desenhar janelas
         for janela in self.janelas:
             self.desenharJanela(janela['x'], janela['y'], janela['altura'])
+        
+        # Desenhar portas
         for porta in self.portas:
             self.desenharPorta(porta['x'], porta['y'], porta['altura'])
+        
+        # Desenhar objetos estáticos
         for obj in self.objetos_estaticos:
             self.desenharObjetoEstatico(obj['x'], obj['y'])
         for cap in self.capsulas:
