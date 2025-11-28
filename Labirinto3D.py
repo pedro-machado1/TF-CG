@@ -22,79 +22,250 @@ class Labirinto3D:
         self.display = (largura, altura)
         self.clock = pygame.time.Clock()
         self.fps = 60
-        
-        # Configurar OpenGL
+
         pygame.display.set_mode(self.display, DOUBLEBUF | OPENGL)
-        pygame.display.set_caption("Labirinto 3D - Navegação em Primeira e Terceira Pessoa")
-        
+        pygame.display.set_caption("Labirinto 3D - Navegação")
+
         glEnable(GL_DEPTH_TEST)
         glClearColor(0.1, 0.1, 0.15, 1.0)
-        
-        # Variáveis do mapa
-        self.mapa = []
-        self.mapa_largura = 0
-        self.mapa_altura = 0
-        self.carregarMapa("mapa_labirinto.txt")
-        
-        # Dimensões do labirinto
-        self.TAMANHO_CELULA = 1.0  # 1 metro
+
+        # Dimensões e constantes
+        self.TAMANHO_CELULA = 1.0
         self.ALTURA_PAREDE = 2.7
         self.ESPESSURA_PAREDE = 0.25
         self.ALTURA_JOGADOR = 1.7
-        
-        # Posição e rotação do jogador
-        self.posicao_jogador = np.array([1.5, 0.0, 1.5], dtype=float)
-        self.angulo_rotacao = 0.0  # Rotação em graus
-        self.velocidade_jogador = 8.0  # m/s
-        self.movimento_ativo = True  # Sempre ativo
-        self.espaco_pressionado = False  # Para movimento com espaço
-        
-        # Câmera - COMEÇAR EM TERCEIRA PESSOA
-        self.modo_camera = 1  # 0=primeira pessoa, 1=terceira pessoa
-        self.alvo_camera = 1  # 0=centro do mapa, 1=jogador
-        
-        # Estados de controle
+
+        self.ALTURA_JANELA = 1.0
+        self.ALTURA_PORTA = 2.1
+        self.ALTURA_BASE_JANELA = 0.9
+
+        # Estado do mundo
+        self.mapa = []
+        self.mapa_largura = 0
+        self.mapa_altura = 0
+        self.janelas = []
+        self.portas = []
+        self.inimigos = []
+        self.objetos_estaticos = []
+        self.capsulas = []
+
+        # Jogador: velocidade e energia
+        self.velocidade_jogador = 10.0
+        self.energia = 100.0
+        self.energia_max = 100.0
+        self.consumo_por_segundo = 1.0
+        self.pontos = 0
+
+        # Carregar mapa (isso pode definir self.posicao_jogador se o mapa tiver '3')
+        self.carregarMapa("mapa_labirinto.txt")
+
+        # Garantir que posicao_jogador exista (carregarMapa já define se tiver '3')
+        if not hasattr(self, 'posicao_jogador') or self.posicao_jogador is None:
+            self.posicao_jogador = np.array([1.5, 0.0, 1.5], dtype=float)
+
+        # Agora instancia inimigos/cápsulas respeitando a posição do jogador
+        self.instanciarInimigos(0)
+        self.instanciarCapsulas(10)
+
+        # Posição/rot. final do jogador (já garantida acima)
+        # self.posicao_jogador = np.array([1.5, 0.0, 1.5], dtype=float)  # removido (não sobrescrever)
+
+        self.angulo_rotacao = 0.0
+        self.velocidade_jogador = 8.0
+        self.movimento_ativo = True
+        self.espaco_pressionado = False
+
+        self.modo_camera = 1
+        self.alvo_camera = 1
+
         self.running = True
         self.tempo_anterior = 0
-        
+
         print(f"Jogador iniciado em: {self.posicao_jogador}")
+
+    # --------------------- captura de cápsulas (corrigida) ---------------------
+    def verificarCapturaCapsulas(self):
+        """
+        Verifica e processa captura de cápsulas:
+         - itera de trás pra frente para poder remover elementos com segurança
+         - usa raio de captura razoável (ajustável)
+         - atualiza energia e pontos, remove cápsula da lista
+        """
+        jogador_x = self.posicao_jogador[0]
+        jogador_z = self.posicao_jogador[2]
+
+        raio_captura = 1  # <- ajuste aqui se quiser menor/maior
+
+        # iterar de trás para frente para permitir pop sem quebrar o loop
+        for i in range(len(self.capsulas) - 1, -1, -1):
+            cap = self.capsulas[i]
+            dx = jogador_x - cap["x"]
+            dz = jogador_z - cap["z"]
+            dist = math.hypot(dx, dz)
+
+            if dist <= raio_captura:
+                # efeito da cápsula
+                antes = self.energia
+                ganho = 30
+                self.energia = min(self.energia + ganho, self.energia_max)
+                self.pontos += 1
+                print(f"[DEBUG] Cápsula idx={i} coletada: energia {antes} -> {self.energia} | pontos={self.pontos}")
+
+                # remover do mundo (não haverá mais colisão)
+                self.capsulas.pop(i)
+
+                # opcional: reposicionar ao invés de remover (comente pop e use reposicionarCapsula)
+                # self.reposicionarCapsula(i)
+
+                # não retorna; permite coletar múltiplas cápsulas no mesmo frame
+        # fim verificarCapturaCapsulas
+
+    # --------------------- funções de instanciação e utilitários ---------------------
+    def instanciarInimigos(self, quantidade):
+        import random
+        self.inimigos = []
+        livres = []
+        jogador_cel = (int(self.posicao_jogador[0]), int(self.posicao_jogador[2]))
+
+        for y in range(self.mapa_altura):
+            for x in range(self.mapa_largura):
+                if self.ehCelulaLivre(x, y) and (x, y) != jogador_cel:
+                    livres.append((x, y))
+
+        caps = set((int(c['x']), int(c['z'])) for c in self.capsulas)
+        livres = [p for p in livres if p not in caps]
+
+        random.shuffle(livres)
+        for i in range(quantidade):
+            if i < len(livres):
+                pos = livres[i]
+                self.inimigos.append({
+                    'x': pos[0] + 0.5,
+                    'y': 0.0,
+                    'z': pos[1] + 0.5
+                })
+
+    def escolherCelulaLivreAleatoria(self):
+        import random
+        def _inner(avoid_positions=None):
+            livres = []
+            for yy in range(self.mapa_altura):
+                for xx in range(self.mapa_largura):
+                    if self.ehCelulaLivre(xx, yy):
+                        if avoid_positions and (xx, yy) in avoid_positions:
+                            continue
+                        livres.append((xx, yy))
+            if not livres:
+                return None
+            return random.choice(livres)
+        return _inner
+
+    def instanciarCapsulas(self, quantidade):
+        import random
+        chooser = self.escolherCelulaLivreAleatoria()
+        while len(self.capsulas) < quantidade:
+            avoid = set()
+            jogador_cel = (int(self.posicao_jogador[0]), int(self.posicao_jogador[2]))
+            avoid.add(jogador_cel)
+
+            for c in self.capsulas:
+                avoid.add((int(c['x']), int(c['z'])))
+
+            for inim in self.inimigos:
+                avoid.add((int(inim['x']), int(inim['z'])))
+
+            cel = chooser(avoid_positions=avoid)
+            if cel is None:
+                break
+
+            self.capsulas.append({
+                'x': cel[0] + 0.5,
+                'y': 0.0,
+                'z': cel[1] + 0.5
+            })
+
+    def reposicionarCapsula(self, idx):
+        """Move a cápsula de índice idx para outra célula livre aleatória"""
+        chooser = self.escolherCelulaLivreAleatoria()
+        # Evitar jogador, outras cápsulas e inimigos
+        avoid = set()
+        jogador_cel = (int(self.posicao_jogador[0]), int(self.posicao_jogador[2]))
+        avoid.add(jogador_cel)
+        for i, c in enumerate(self.capsulas):
+            if i == idx:
+                continue
+            avoid.add((int(c['x']), int(c['z'])))
+        for inim in self.inimigos:
+            avoid.add((int(inim['x']), int(inim['z'])))
+
+        cel = chooser(avoid_positions=avoid)
+        if cel:
+            self.capsulas[idx]['x'] = cel[0] + 0.5
+            self.capsulas[idx]['z'] = cel[1] + 0.5
+            return True
+        return False
+
+    def reposicionarInimigoAleatorio(self, inimigo):
+        chooser = self.escolherCelulaLivreAleatoria()
+        avoid = set()
+        jogador_cel = (int(self.posicao_jogador[0]), int(self.posicao_jogador[2]))
+        avoid.add(jogador_cel)
+        for c in self.capsulas:
+            avoid.add((int(c['x']), int(c['z'])))
+        for inim in self.inimigos:
+            if inim is inimigo:
+                continue
+            avoid.add((int(inim['x']), int(inim['z'])))
+
+        cel = chooser(avoid_positions=avoid)
+        if cel:
+            inimigo['x'] = cel[0] + 0.5
+            inimigo['z'] = cel[1] + 0.5
+
+    # --------------------- carregamento / criação de mapa ---------------------
     def carregarMapa(self, nome_arquivo):
-        """Carrega o mapa do arquivo de texto"""
+        """Carrega o mapa do arquivo de texto, incluindo janelas e portas"""
         try:
             with open(nome_arquivo, 'r') as f:
                 linhas = f.readlines()
-            
-            # Ignorar linhas de comentário e linhas vazias
             linhas_validas = [l.strip() for l in linhas if l.strip() and not l.strip().startswith('#')]
-            
-            # Primeira linha válida contém dimensões
             dimensoes = linhas_validas[0].split()
             self.mapa_largura = int(dimensoes[0])
             self.mapa_altura = int(dimensoes[1])
-            
-            # Carregar mapa
             self.mapa = []
             posicao_inicial_encontrada = False
-            
+            self.janelas = []
+            self.portas = []
+            self.objetos_estaticos = []
+            self.capsulas = []
             for y in range(self.mapa_altura):
                 linha = linhas_validas[y + 1].split()
-                linha_mapa = [int(x) for x in linha]
-                self.mapa.append(linha_mapa)
-                
-                # Procurar pelo 3 (posição inicial)
-                for x in range(self.mapa_largura):
-                    if linha_mapa[x] == 3:
+                linha_mapa = []
+                for x, val in enumerate(linha):
+                    v = int(val)
+                    linha_mapa.append(v)
+                    if v == 3:
                         self.posicao_jogador = np.array([x + 0.5, 0.85, y + 0.5], dtype=float)
-                        self.mapa[y][x] = 1  # Converter para corredor
+                        linha_mapa[-1] = 1  # Converter para corredor
                         posicao_inicial_encontrada = True
                         print(f"Posição inicial encontrada em: ({x}, {y}) -> {self.posicao_jogador}")
-            
+                    elif v == 4:
+                        self.janelas.append({'x': x, 'y': y, 'altura': self.ALTURA_JANELA})
+                    elif v == 5:
+                        self.portas.append({'x': x, 'y': y, 'altura': self.ALTURA_PORTA})
+                    elif v == 6:
+                        self.objetos_estaticos.append({'x': x, 'y': y, 'tipo': 'obj'})
+                    elif v == 7:
+                        self.capsulas.append({'x': x + 0.5, 'y': 0.0, 'z': y + 0.5})
+                        linha_mapa[-1] = 1  # Converte a célula 7 (cápsula) em 1 (chão) no mapa físico
+                self.mapa.append(linha_mapa)
             if not posicao_inicial_encontrada:
                 print("Aviso: Nenhuma posição inicial (3) encontrada no mapa!")
+                # criarMapaPadrao ou definir posição padrão
+                # neste ponto apenas definiremos posição padrão, criarMapaPadrao é fallback
                 self.posicao_jogador = np.array([1.5, 0.85, 1.5], dtype=float)
-            
             print(f"Mapa carregado: {self.mapa_largura}x{self.mapa_altura}")
-            
+            print(f"Janelas encontradas: {len(self.janelas)} | Portas encontradas: {len(self.portas)}")
         except FileNotFoundError:
             print(f"Erro: Arquivo {nome_arquivo} não encontrado!")
             self.criarMapaPadrao()
@@ -103,7 +274,6 @@ class Labirinto3D:
             self.criarMapaPadrao()
 
     def criarMapaPadrao(self):
-        """Cria um mapa padrão se o arquivo não existir"""
         self.mapa_largura = 10
         self.mapa_altura = 10
         self.mapa = [
@@ -119,21 +289,16 @@ class Labirinto3D:
             [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
         ]
         self.posicao_jogador = np.array([1.5, 0.0, 1.5], dtype=float)
-    
+
+    # --------------------- colisões / movimentos / desenho (restante) ---------------------
     def ehCelulaLivre(self, x, y):
-        """Verifica se uma célula do mapa é livre (corredor ou sala)"""
         if x < 0 or x >= self.mapa_largura or y < 0 or y >= self.mapa_altura:
             return False
         celula = self.mapa[int(y)][int(x)]
-        # 1=corredor, 2=sala, 3=posição inicial (convertida pra 1)
         return celula in [1, 2, 3]
-    
+
     def verificarColisao(self, pos_x, pos_z):
-        """Verifica colisão com paredes"""
-        # Verificar raio de colisão (20cm)
         raio_colisao = 0.2
-        
-        # Verificar 4 pontos ao redor da posição
         pontos = [
             (pos_x, pos_z),
             (pos_x + raio_colisao, pos_z),
@@ -141,43 +306,42 @@ class Labirinto3D:
             (pos_x, pos_z + raio_colisao),
             (pos_x, pos_z - raio_colisao),
         ]
-        
         for px, pz in pontos:
             celula_x = int(px)
             celula_z = int(pz)
             if not self.ehCelulaLivre(celula_x, celula_z):
                 return True
         return False
-    
+
     def atualizarMovimento(self, dt):
-        """Atualiza a posição do jogador baseado no movimento"""
-        if dt <= 0 or not self.espaco_pressionado:
+        if dt <= 0:
             return
-            
-        # Calcular deslocamento
+        if not self.espaco_pressionado:
+            return
+        if self.energia <= 0:
+            return
+
         deslocamento = self.velocidade_jogador * dt
         rad = math.radians(self.angulo_rotacao)
-        
-        # Movimento para frente (quando espaço está pressionado)
+
         nova_x = self.posicao_jogador[0] + deslocamento * math.sin(rad)
         nova_z = self.posicao_jogador[2] + deslocamento * math.cos(rad)
-        
+
+        self.energia -= self.consumo_por_segundo * dt
+        if self.energia < 0:
+            self.energia = 0
+
         if not self.verificarColisao(nova_x, nova_z):
             self.posicao_jogador[0] = nova_x
             self.posicao_jogador[2] = nova_z
 
-    def desenharParede(self, x, z, altura, espessura, face_norte=True, face_sul=True, 
+    def desenharParede(self, x, z, altura, espessura, face_norte=True, face_sul=True,
                        face_leste=True, face_oeste=True):
-        """Desenha uma parede em uma posição específica do mapa"""
-        # Centro da célula
         cx = x + 0.5
         cz = z + 0.5
         tamanho = self.TAMANHO_CELULA
         esp = espessura / 2
-        
         glColor3f(0.7, 0.7, 0.7)
-        
-        # Face frente (eixo Z negativo)
         if face_norte:
             glBegin(GL_QUADS)
             glVertex3f(cx - tamanho/2, 0, cz - tamanho/2)
@@ -185,8 +349,6 @@ class Labirinto3D:
             glVertex3f(cx + tamanho/2, altura, cz - tamanho/2)
             glVertex3f(cx - tamanho/2, altura, cz - tamanho/2)
             glEnd()
-        
-        # Face trás (eixo Z positivo)
         if face_sul:
             glBegin(GL_QUADS)
             glVertex3f(cx + tamanho/2, 0, cz + tamanho/2)
@@ -194,8 +356,6 @@ class Labirinto3D:
             glVertex3f(cx - tamanho/2, altura, cz + tamanho/2)
             glVertex3f(cx + tamanho/2, altura, cz + tamanho/2)
             glEnd()
-        
-        # Face esquerda (eixo X negativo)
         if face_oeste:
             glBegin(GL_QUADS)
             glVertex3f(cx - tamanho/2, 0, cz + tamanho/2)
@@ -203,8 +363,6 @@ class Labirinto3D:
             glVertex3f(cx - tamanho/2, altura, cz - tamanho/2)
             glVertex3f(cx - tamanho/2, altura, cz + tamanho/2)
             glEnd()
-        
-        # Face direita (eixo X positivo)
         if face_leste:
             glBegin(GL_QUADS)
             glVertex3f(cx + tamanho/2, 0, cz - tamanho/2)
@@ -212,10 +370,8 @@ class Labirinto3D:
             glVertex3f(cx + tamanho/2, altura, cz + tamanho/2)
             glVertex3f(cx + tamanho/2, altura, cz - tamanho/2)
             glEnd()
-    
+
     def desenharLabirinto(self):
-        """Desenha o labirinto completo"""
-        # Desenhar piso
         glColor3f(0.5, 0.5, 0.5)
         glBegin(GL_QUADS)
         glVertex3f(0, -0.1, 0)
@@ -223,141 +379,233 @@ class Labirinto3D:
         glVertex3f(self.mapa_largura, -0.1, self.mapa_altura)
         glVertex3f(0, -0.1, self.mapa_altura)
         glEnd()
-        
-        # Desenhar paredes
         for y in range(self.mapa_altura):
             for x in range(self.mapa_largura):
-                if self.mapa[y][x] == 0:  # Parede
+                if self.mapa[y][x] == 0:
                     self.desenharParede(x, y, self.ALTURA_PAREDE, self.ESPESSURA_PAREDE)
-    
+        for janela in self.janelas:
+            self.desenharJanela(janela['x'], janela['y'], janela['altura'])
+        for porta in self.portas:
+            self.desenharPorta(porta['x'], porta['y'], porta['altura'])
+        for obj in self.objetos_estaticos:
+            self.desenharObjetoEstatico(obj['x'], obj['y'])
+        for cap in self.capsulas:
+            self.desenharCapsula(cap)
+        for inimigo in self.inimigos:
+            self.desenharInimigo(inimigo)
+
+    def desenharInimigo(self, inimigo):
+        glPushMatrix()
+        glTranslatef(inimigo['x'], inimigo['y'] + 0.5, inimigo['z'])
+        glColor3f(1.0, 0.0, 0.0)
+        quad = gluNewQuadric()
+        gluSphere(quad, 0.4, 16, 16)
+        glPopMatrix()
+
+    def desenharCapsula(self, cap):
+        glPushMatrix()
+        glTranslatef(cap['x'], cap['y'] + 0.2, cap['z'])
+        glColor3f(0.0, 1.0, 0.0)
+        quad = gluNewQuadric()
+        gluSphere(quad, 0.2, 12, 12)
+        glPopMatrix()
+
+    def desenharObjetoEstatico(self, x, y):
+        cx = x + 0.5
+        cz = y + 0.5
+        glPushMatrix()
+        glTranslatef(cx, 0.0, cz)
+        glColor3f(0.6, 0.4, 0.2)
+        tamanho = 0.2
+        glBegin(GL_QUADS)
+        glVertex3f(-tamanho, 0.4, -tamanho)
+        glVertex3f(tamanho, 0.4, -tamanho)
+        glVertex3f(tamanho, 0.4, tamanho)
+        glVertex3f(-tamanho, 0.4, tamanho)
+        # Frente
+        glVertex3f(-tamanho, 0.0, -tamanho)
+        glVertex3f(tamanho, 0.0, -tamanho)
+        glVertex3f(tamanho, 0.4, -tamanho)
+        glVertex3f(-tamanho, 0.4, -tamanho)
+        # Costas
+        glVertex3f(tamanho, 0.0, tamanho)
+        glVertex3f(-tamanho, 0.0, tamanho)
+        glVertex3f(-tamanho, 0.4, tamanho)
+        glVertex3f(tamanho, 0.4, tamanho)
+        # Laterais
+        glVertex3f(-tamanho, 0.0, tamanho)
+        glVertex3f(-tamanho, 0.0, -tamanho)
+        glVertex3f(-tamanho, 0.4, -tamanho)
+        glVertex3f(-tamanho, 0.4, tamanho)
+        glVertex3f(tamanho, 0.0, -tamanho)
+        glVertex3f(tamanho, 0.0, tamanho)
+        glVertex3f(tamanho, 0.4, tamanho)
+        glVertex3f(tamanho, 0.4, -tamanho)
+        glEnd()
+        glPopMatrix()
+
+    def atualizarInimigos(self, dt):
+        velocidade = 20.0
+        for inimigo in self.inimigos:
+            dx = self.posicao_jogador[0] - inimigo['x']
+            dz = self.posicao_jogador[2] - inimigo['z']
+            dist = (dx**2 + dz**2) ** 0.5
+            if dist < 0.7:
+                quantidade_roubada = 20.0
+                roubado = min(self.energia, quantidade_roubada)
+                self.energia -= roubado
+                self.pontos -= 10
+                self.reposicionarInimigoAleatorio(inimigo)
+                continue
+            if dist > 0.01:
+                dir_x = dx / dist
+                dir_z = dz / dist
+                novo_x = inimigo['x'] + dir_x * velocidade * dt
+                novo_z = inimigo['z'] + dir_z * velocidade * dt
+                if self.ehCelulaLivre(int(novo_x), int(novo_z)):
+                    inimigo['x'] = novo_x
+                    inimigo['z'] = novo_z
+                else:
+                    if self.ehCelulaLivre(int(novo_x), int(inimigo['z'])):
+                        inimigo['x'] = novo_x
+                    elif self.ehCelulaLivre(int(inimigo['x']), int(novo_z)):
+                        inimigo['z'] = novo_z
+
+    def desenharJanela(self, x, y, altura_janela):
+        cx = x + 0.5
+        cz = y + 0.5
+        tamanho = self.TAMANHO_CELULA
+        esp = self.ESPESSURA_PAREDE / 2
+        base = self.ALTURA_BASE_JANELA
+        h = altura_janela
+        glColor3f(0.2, 0.7, 1.0)
+        glBegin(GL_QUADS)
+        glVertex3f(cx - tamanho/2, base, cz - tamanho/2 + esp)
+        glVertex3f(cx + tamanho/2, base, cz - tamanho/2 + esp)
+        glVertex3f(cx + tamanho/2, base + h, cz - tamanho/2 + esp)
+        glVertex3f(cx - tamanho/2, base + h, cz - tamanho/2 + esp)
+        glEnd()
+
+    def desenharPorta(self, x, y, altura_porta):
+        cx = x + 0.5
+        cz = y + 0.5
+        tamanho = self.TAMANHO_CELULA
+        esp = self.ESPESSURA_PAREDE / 2
+        h = altura_porta
+        glColor3f(0.7, 0.5, 0.2)
+        glBegin(GL_QUADS)
+        glVertex3f(cx - tamanho/2, 0, cz - tamanho/2 + esp)
+        glVertex3f(cx + tamanho/2, 0, cz - tamanho/2 + esp)
+        glVertex3f(cx + tamanho/2, h, cz - tamanho/2 + esp)
+        glVertex3f(cx - tamanho/2, h, cz - tamanho/2 + esp)
+        glEnd()
+        glBegin(GL_QUADS)
+        glVertex3f(cx + tamanho/2, 0, cz + tamanho/2 - esp)
+        glVertex3f(cx - tamanho/2, 0, cz + tamanho/2 - esp)
+        glVertex3f(cx - tamanho/2, h, cz + tamanho/2 - esp)
+        glVertex3f(cx + tamanho/2, h, cz + tamanho/2 - esp)
+        glEnd()
+        glBegin(GL_QUADS)
+        glVertex3f(cx + tamanho/2 - esp, 0, cz - tamanho/2)
+        glVertex3f(cx + tamanho/2 - esp, 0, cz + tamanho/2)
+        glVertex3f(cx + tamanho/2 - esp, h, cz + tamanho/2)
+        glVertex3f(cx + tamanho/2 - esp, h, cz - tamanho/2)
+        glEnd()
+        glBegin(GL_QUADS)
+        glVertex3f(cx - tamanho/2 + esp, 0, cz + tamanho/2)
+        glVertex3f(cx - tamanho/2 + esp, 0, cz - tamanho/2)
+        glVertex3f(cx - tamanho/2 + esp, h, cz - tamanho/2)
+        glVertex3f(cx - tamanho/2 + esp, h, cz + tamanho/2)
+        glEnd()
+
     def desenharJogador(self):
-        """Desenha o personagem do jogador com corpo e cabeça"""
         glPushMatrix()
         glTranslatef(self.posicao_jogador[0], self.posicao_jogador[1], self.posicao_jogador[2])
         glRotatef(self.angulo_rotacao, 0, 1, 0)
-        
-        # Corpo (cilindro azul)
         glColor3f(0.0, 0.5, 1.0)
         glPushMatrix()
         glTranslatef(0, 0.6, 0)
         quad = GLUquadric()
-        gluCylinder(quad, 0.2, 0.2, 0.6, 16, 16)  # Corpo
+        gluCylinder(quad, 0.2, 0.2, 0.6, 16, 16)
         glPopMatrix()
-        
-        # Cabeça (esfera vermelha)
         glColor3f(1.0, 0.2, 0.2)
         glPushMatrix()
         glTranslatef(0, 1.3, 0)
         quad = GLUquadric()
-        gluSphere(quad, 0.25, 16, 16)  # Cabeça
+        gluSphere(quad, 0.25, 16, 16)
         glPopMatrix()
-        
-        # Olho (pequena esfera preta na frente)
         glColor3f(0.0, 0.0, 0.0)
         glPushMatrix()
         glTranslatef(0, 1.35, 0.2)
         quad = GLUquadric()
-        gluSphere(quad, 0.08, 8, 8)  # Olho
+        gluSphere(quad, 0.08, 8, 8)
         glPopMatrix()
-        
-        # Seta de direção (cone amarelo apontando para frente)
         glColor3f(1.0, 1.0, 0.0)
         glPushMatrix()
         glTranslatef(0, 0.5, 0.4)
         glRotatef(90, 1, 0, 0)
-
-        # Criar o quadric
         quad = gluNewQuadric()
         gluQuadricNormals(quad, GLU_SMOOTH)
         gluQuadricTexture(quad, False)
-
-        # Cone (base = 0.12, topo = 0.0, altura = 0.3)
         gluCylinder(quad, 0.12, 0.0, 0.3, 16, 16)
-
         glPopMatrix()
-
-        
         glPopMatrix()
 
     def configurarPerspectiva(self):
-        """Configura a perspectiva da câmera"""
         glMatrixMode(GL_PROJECTION)
         glLoadIdentity()
         gluPerspective(45, (self.largura / self.altura), 0.1, 500.0)
         glMatrixMode(GL_MODELVIEW)
         glLoadIdentity()
-        
-        if self.modo_camera == 0:  # Primeira pessoa
-            # Câmera na altura dos olhos do jogador
+
+        if self.modo_camera == 0:
             camera_x = self.posicao_jogador[0]
             camera_y = self.posicao_jogador[1] + self.ALTURA_JOGADOR
             camera_z = self.posicao_jogador[2]
-            
             rad = math.radians(self.angulo_rotacao)
             alvo_x = camera_x + math.sin(rad) * 5
             alvo_z = camera_z + math.cos(rad) * 5
-            
-            gluLookAt(camera_x, camera_y, camera_z,
-                     alvo_x, camera_y, alvo_z,
-                     0, 1, 0)
-        
-        else:  # Terceira pessoa
-            if self.alvo_camera == 1:  # Câmera segue o jogador
+            gluLookAt(camera_x, camera_y, camera_z, alvo_x, camera_y, alvo_z, 0, 1, 0)
+        else:
+            if self.alvo_camera == 1:
                 camera_x = self.posicao_jogador[0] - math.sin(math.radians(self.angulo_rotacao)) * 8
                 camera_y = self.posicao_jogador[1] + 5
                 camera_z = self.posicao_jogador[2] - math.cos(math.radians(self.angulo_rotacao)) * 8
-                
                 gluLookAt(camera_x, camera_y, camera_z,
-                         self.posicao_jogador[0], self.posicao_jogador[1] + 1, self.posicao_jogador[2],
-                         0, 1, 0)
-            else:  # Câmera fixa no centro
+                          self.posicao_jogador[0], self.posicao_jogador[1] + 1, self.posicao_jogador[2],
+                          0, 1, 0)
+            else:
                 centro_x = self.mapa_largura / 2
                 centro_z = self.mapa_altura / 2
                 gluLookAt(centro_x, 15, centro_z + 10,
-                         centro_x, 0, centro_z,
-                         0, 1, 0)
-    
+                          centro_x, 0, centro_z, 0, 1, 0)
+
     def procesarEventos(self):
-        """Processa eventos do teclado e mouse"""
         for evento in pygame.event.get():
             if evento.type == pygame.QUIT:
                 self.running = False
-            
             elif evento.type == pygame.KEYDOWN:
                 if evento.key == pygame.K_ESCAPE:
                     self.running = False
-                
                 elif evento.key == pygame.K_1:
                     self.modo_camera = 0
-                    print("Câmera: Primeira Pessoa")
-                
                 elif evento.key == pygame.K_2:
                     self.modo_camera = 1
-                    print("Câmera: Terceira Pessoa")
-                
                 elif evento.key == pygame.K_3:
                     self.alvo_camera = (self.alvo_camera + 1) % 2
-                    alvo = "Centro do Mapa" if self.alvo_camera == 0 else "Jogador"
-                    print(f"Alvo da Câmera: {alvo}")
-                
                 elif evento.key == pygame.K_SPACE:
                     self.espaco_pressionado = True
-            
             elif evento.type == pygame.KEYUP:
                 if evento.key == pygame.K_SPACE:
                     self.espaco_pressionado = False
-        
-        # Verificar teclas pressionadas para rotação
+
         teclas = pygame.key.get_pressed()
-        
         if teclas[pygame.K_LEFT]:
             self.angulo_rotacao += 3
         if teclas[pygame.K_RIGHT]:
             self.angulo_rotacao -= 3
 
     def desenharHUD(self):
-        """Desenha informações na tela"""
-        # Mudar para modo ortho para desenhar texto
         glMatrixMode(GL_PROJECTION)
         glPushMatrix()
         glLoadIdentity()
@@ -366,57 +614,73 @@ class Labirinto3D:
         glPushMatrix()
         glLoadIdentity()
         glDisable(GL_DEPTH_TEST)
-        
-        # Aqui você poderia adicionar texto usando pygame.font
-        # Por enquanto, apenas restauramos o estado
-        
+        try:
+            glPushAttrib(GL_ENABLE_BIT)
+            glDisable(GL_TEXTURE_2D)
+            barra_x = 10
+            barra_y = 5
+            barra_larg = 200
+            barra_alt = 16
+            frac = 0.0
+            try:
+                frac = max(0.0, min(1.0, float(self.energia) / float(self.energia_max)))
+            except Exception:
+                frac = 0.0
+            glColor3f(0.2, 0.2, 0.2)
+            glBegin(GL_QUADS)
+            glVertex2f(barra_x, barra_y)
+            glVertex2f(barra_x + barra_larg, barra_y)
+            glVertex2f(barra_x + barra_larg, barra_y + barra_alt)
+            glVertex2f(barra_x, barra_y + barra_alt)
+            glEnd()
+            glColor3f(0.0, 1.0, 0.0)
+            glBegin(GL_QUADS)
+            glVertex2f(barra_x + 2, barra_y + 2)
+            glVertex2f(barra_x + 2 + (barra_larg - 4) * frac, barra_y + 2)
+            glVertex2f(barra_x + 2 + (barra_larg - 4) * frac, barra_y + barra_alt - 2)
+            glVertex2f(barra_x + 2, barra_y + barra_alt - 2)
+            glEnd()
+            glPopAttrib()
+            font = pygame.font.SysFont(None, 24)
+            texto = f"Energia: {int(self.energia)}  Pontos: {self.pontos}"
+            surf = font.render(texto, True, (255, 255, 255))
+            surf = surf.convert_alpha()
+            w, h = surf.get_size()
+            data = pygame.image.tostring(surf, "RGBA", True)
+            glEnable(GL_BLEND)
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+            glRasterPos2i(10, 20)
+            glDrawPixels(w, h, GL_RGBA, GL_UNSIGNED_BYTE, data)
+            glDisable(GL_BLEND)
+        except Exception:
+            pass
         glPopMatrix()
         glMatrixMode(GL_PROJECTION)
         glPopMatrix()
         glMatrixMode(GL_MODELVIEW)
         glEnable(GL_DEPTH_TEST)
-    
+
     def executar(self):
-        """Loop principal do programa"""
         print("\n=== LABIRINTO 3D ===")
-        print("Controles:")
-        print("  BARRA DE ESPAÇO - Avançar")
-        print("  SETA ESQUERDA/DIREITA - Girar")
-        print("  1 - Câmera em Primeira Pessoa")
-        print("  2 - Câmera em Terceira Pessoa")
-        print("  3 - Alternar alvo da câmera")
-        print("  ESC - Sair")
-        print("================\n")
-        
+        print("Controles: BARRA - Avançar | ESQ/DIR - Girar | 1/2 - Câmera | ESC - Sair")
         while self.running:
             self.procesarEventos()
-            
-            # Calcular delta time
             tempo_atual = pygame.time.get_ticks() / 1000.0
             dt = tempo_atual - self.tempo_anterior
             self.tempo_anterior = tempo_atual
-            
-            if dt > 0.05:  # Limitar para evitar saltos grandes
+            if dt > 0.05:
                 dt = 0.05
-            
-            # Atualizar lógica
             self.atualizarMovimento(dt)
-            
-            # Limpar tela
+            self.atualizarInimigos(dt)
+            # verificar captura (chamada corrigida)
+            self.verificarCapturaCapsulas()
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
-            
-            # Configurar câmera
             self.configurarPerspectiva()
-            
-            # Desenhar cena
             self.desenharLabirinto()
             self.desenharJogador()
             self.desenharHUD()
-            
-            # Atualizar display
             pygame.display.flip()
             self.clock.tick(self.fps)
-        
         pygame.quit()
         print("\nPrograma encerrado!")
 
