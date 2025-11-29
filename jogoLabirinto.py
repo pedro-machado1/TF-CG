@@ -1,15 +1,12 @@
-# jogoLabirinto_glut.py
-# Conversão completa: removido pygame -> uso GLUT para janela, eventos e HUD
 from OpenGL.GL import *
 from OpenGL.GLU import *
 from OpenGL.GLUT import *
 import time
 import math
-import numpy as np
+import numpy as npy
 from PIL import Image
 import os
 import random
-from collections import deque
 
 class Labirinto3D:
     def __init__(self, largura=1240, altura=800):
@@ -18,26 +15,25 @@ class Labirinto3D:
         self.tempo_anterior = time.time()
         self.running = True
 
-        # Inicializar GLUT
+        # Configuração inicial do OpenGL/GLUT
         glutInit()
         glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGBA | GLUT_DEPTH)
         glutInitWindowSize(self.largura, self.altura)
-        glutInitWindowPosition(100, 100)
-        glutCreateWindow(b"Labirinto 3D - GLUT")
+        glutInitWindowPosition(10, 0)
+        glutCreateWindow(b"Labirinto 3D")
 
         glEnable(GL_DEPTH_TEST)
         glClearColor(0.1, 0.1, 0.15, 1.0)
 
-        # Dimensões e constantes
+        # Definições de tamanho do mundo
         self.TAMANHO_CELULA = 1.0
         self.ALTURA_PAREDE = 2.7
         self.ESPESSURA_PAREDE = 0.25
-
         self.ALTURA_JANELA = 1.0
         self.ALTURA_PORTA = 2.1
         self.ALTURA_BASE_JANELA = 0.9
 
-        # Estado do mundo
+        # Estado do mundo e objetos
         self.mapa = []
         self.mapa_largura = 0
         self.mapa_altura = 0
@@ -46,52 +42,29 @@ class Labirinto3D:
         self.inimigos = []
         self.objetos_estaticos = []
         self.capsulas = []
-        
-        # Modelos TRI
         self.modelos_tri = {}  
         self.objetos_tri = []  
-        
-        # Texturas do piso
         self.texturas_piso = {}  
         self.mapa_tipos_piso = []  
         self.nomes_texturas = {
-            0: 'CROSS.png',
-            1: 'DL.png',
-            2: 'DLR.png',
-            3: 'DR.png',
-            4: 'LR.png',
-            5: 'None.png',
-            6: 'UD.png',
-            7: 'UDL.png',
-            8: 'UDR.png',
-            9: 'UL.png',
-            10: 'ULR.png',
-            11: 'UR.png'
+            0: 'CROSS.png', 1: 'DL.png', 2: 'DLR.png', 3: 'DR.png', 4: 'LR.png', 
+            5: 'None.png', 6: 'UD.png', 7: 'UDL.png', 8: 'UDR.png', 9: 'UL.png', 
+            10: 'ULR.png', 11: 'UR.png'
         }
         
-        # Dados de colisão 
-        self.imagem_colisao = None
-        self.dados_colisao = None
-
-        # Jogador
+        # Estado do jogador
         self.energia = 100.0
         self.pontos = 0
+        self.posicao_jogador = npy.array([0.5, 0.85, 0.5], dtype=float)
 
-         # Escalas
+        # Escalas dos modelos 3D
         self.escalas_modelos = {
-            'barrel': 0.01, 
-            'well': 0.007, 
-            'dead_tree_d': 0.005, 
-            'pine_c': 0.004, 
-            'fountain_b': 0.0015, 
-            'fire_cage': 0.015, 
-            'box': 0.007, 
-            'fence': 0.01, 
+            'barrel': 0.01, 'well': 0.007, 'dead_tree_d': 0.005, 'pine_c': 0.004, 
+            'fountain_b': 0.0015, 'fire_cage': 0.015, 'box': 0.007, 'fence': 0.01, 
             'street_oil_light': 0.01
         }
 
-        # Carregar modelos TRI (se existir pasta TRI)
-        # Mantive sua rotina de carga de TRI
+        # Carrega modelos 3D
         self.carregarModeloTRI('TRI/barrel.tri', 'barrel')
         self.carregarModeloTRI('TRI/well.tri', 'well')
         self.carregarModeloTRI('TRI/dead_tree_d.tri', 'dead_tree_d')
@@ -102,41 +75,36 @@ class Labirinto3D:
         self.carregarModeloTRI('TRI/fence.tri', 'fence')
         self.carregarModeloTRI('TRI/street_oil_light.tri', 'street_oil_light')
 
-        # Carregar mapa
-        # Mantive nome original; troque se quiser outro arquivo
+        # Carrega mapa e texturas
         self.carregarMapa("mapa_labirinto_texturas.txt")
         self.carregarTexturasPiso()
         
-        # instancia inimigos/cápsulas
-        # posicao_jogador é definida em carregarMapa
+        # Instancia elementos dinâmicos
         self.instanciarInimigos(1)
         self.instanciarCapsulas(10)
 
+        # Controles e câmera
         self.angulo_rotacao = 0.0
         self.movimento_ativo = True
         self.espaco_pressionado = False
-
         self.modo_camera = 1
         self.alvo_camera = 1
 
-        # REGISTRAR CALLBACKS GLUT para eventos e loop
+        # Configura callbacks GLUT
         glutDisplayFunc(self.loopPrincipal)
         glutIdleFunc(self.loopPrincipal)
         glutKeyboardFunc(self.teclaNormal)
-        # keyboard up available em freeglut
+        
         try:
             glutKeyboardUpFunc(self.teclaNormalSolta)
         except Exception:
-            # Se não disponível, fallback: set flag no próprio teclado
             pass
         glutSpecialFunc(self.teclaEspecial)
-        # redimensionamento
         glutReshapeFunc(self.reshape)
 
-    # ---------- Manipulação de teclas (GLUT) ----------
+    # Lida com pressionar de teclas normais
     def teclaNormal(self, key, x, y):
-        # key: bytes
-        if key == b'\x1b':  # ESC
+        if key == b'\x1b':
             try:
                 glutLeaveMainLoop()
             except Exception:
@@ -150,26 +118,27 @@ class Labirinto3D:
         elif key == b'3':
             self.alvo_camera = (self.alvo_camera + 1) % 2
 
+    # Lida com soltar de teclas normais
     def teclaNormalSolta(self, key, x, y):
         if key == b' ':
             self.espaco_pressionado = False
 
+    # Lida com teclas especiais (setas)
     def teclaEspecial(self, key, x, y):
-        # GLUT_KEY_LEFT, GLUT_KEY_RIGHT
         if key == GLUT_KEY_LEFT:
             self.angulo_rotacao += 3
         elif key == GLUT_KEY_RIGHT:
             self.angulo_rotacao -= 3
 
+    # Lida com redimensionamento da janela
     def reshape(self, w, h):
-        # Atualiza viewport e armazenar novas dimensões
         if h == 0:
             h = 1
         self.largura = w
         self.altura = h
         glViewport(0, 0, w, h)
 
-    # ---------- Funções originais preservadas (lógica do jogo) ----------
+    # Coleta cápsulas de energia
     def verificarCapturaCapsulas(self):
         jogador_x = self.posicao_jogador[0]
         jogador_z = self.posicao_jogador[2]
@@ -184,6 +153,7 @@ class Labirinto3D:
                 self.pontos += 3
                 self.reposicionarCapsula(i)
 
+    # Posiciona inimigos em células livres
     def instanciarInimigos(self, quantidade):
         self.inimigos = []
         livres = []
@@ -204,6 +174,7 @@ class Labirinto3D:
                     'z': pos[1] + 0.5
                 })
 
+    # Seleciona uma célula livre aleatória
     def escolherCelulaLivreAleatoria(self, avoid_positions=None):
             livres = []
             for y in range(self.mapa_altura):
@@ -216,6 +187,7 @@ class Labirinto3D:
                 return None
             return random.choice(livres)
 
+    # Posiciona cápsulas
     def instanciarCapsulas(self, quantidade):
         while len(self.capsulas) < quantidade:
             avoid = set()
@@ -234,12 +206,12 @@ class Labirinto3D:
                 'z': cel[1] + 0.5
             })
 
+    # Carrega as texturas do piso
     def carregarTexturasPiso(self):
         caminho_texturas = os.path.join(os.path.dirname(__file__), "TexturaAsfalto")
         for tipo_id, nome_arquivo in self.nomes_texturas.items():
             caminho_completo = os.path.join(caminho_texturas, nome_arquivo)
             if not os.path.exists(caminho_completo):
-                # pula se não existir
                 continue
             img = Image.open(caminho_completo).convert("RGBA")
             img_data = img.tobytes()
@@ -252,11 +224,13 @@ class Labirinto3D:
             glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, img.width, img.height, 0, GL_RGBA, GL_UNSIGNED_BYTE, img_data)
             self.texturas_piso[tipo_id] = textura_id
 
+    # Verifica se a posição é passável
     def ehPassavel(self, pos_x, pos_z):
         if int(pos_x) < 0 or int(pos_x) >= self.mapa_largura or int(pos_z) < 0 or int(pos_z) >= self.mapa_altura:
             return False        
         return self.ehCelulaLivre(int(pos_x), int(pos_z))
 
+    # Carrega modelo TRI
     def carregarModeloTRI(self, caminho_arquivo, nome_modelo):
         try:
             if not os.path.exists(caminho_arquivo):
@@ -291,6 +265,7 @@ class Labirinto3D:
             print(f"Falha ao carregar modelo TRI: {e}")
             return False
 
+    # Reposiciona cápsula coletada
     def reposicionarCapsula(self, indice):
         avoid = set()
         jogador_cel = (int(self.posicao_jogador[0]), int(self.posicao_jogador[2]))
@@ -305,6 +280,7 @@ class Labirinto3D:
         self.capsulas[indice]['x'] = cel[0] + 0.5
         self.capsulas[indice]['z'] = cel[1] + 0.5
 
+    # Reposiciona inimigo após colisão
     def reposicionarInimigoAleatorio(self, inimigo):
         avoid = set()
         jogador_cel = (int(self.posicao_jogador[0]), int(self.posicao_jogador[2]))
@@ -319,6 +295,7 @@ class Labirinto3D:
         inimigo['x'] = cel[0] + 0.5
         inimigo['z'] = cel[1] + 0.5
 
+    # Carrega a estrutura do mapa
     def carregarMapa(self, nome_arquivo):
         try:
             with open(nome_arquivo, 'r', encoding="utf-8") as f:
@@ -348,17 +325,17 @@ class Labirinto3D:
                     else:
                         tipo_celula = int(val)
                     if tipo_celula == 3:
-                        self.posicao_jogador = np.array([x + 0.5, 0.85, y + 0.5], dtype=float)
+                        self.posicao_jogador = npy.array([x + 0.5, 0.85, y + 0.5], dtype=float)
                         linha_mapa.append(1)
                     elif tipo_celula in (1, 2):
                         linha_mapa.append(tipo_celula)
-                    elif tipo_celula == 4:  # janela
+                    elif tipo_celula == 4:
                         self.janelas.append({'x': x, 'y': y, 'altura': self.ALTURA_JANELA})
                         linha_mapa.append(1)
-                    elif tipo_celula == 5:  # porta
+                    elif tipo_celula == 5:
                         self.portas.append({'x': x, 'y': y, 'altura': self.ALTURA_PORTA})
                         linha_mapa.append(1)
-                    elif tipo_celula == 6:  # objeto
+                    elif tipo_celula == 6:
                         modelo = None
                         if ":" in val:
                             _, modelo = val.split(":", 1)
@@ -369,7 +346,7 @@ class Labirinto3D:
                             'tipo': modelo
                         })
                         linha_mapa.append(1)
-                    elif tipo_celula == 7:  # cápsula
+                    elif tipo_celula == 7:
                         self.capsulas.append({'x': x + 0.5, 'y': 0.0, 'z': y + 0.5})
                         linha_mapa.append(1)
                     else:
@@ -383,6 +360,7 @@ class Labirinto3D:
             print(f"Erro ao carregar mapa: {e}")
             raise
 
+    # Converte objetos estáticos para renderização TRI
     def converterObjetosEstaticosParaTRI(self):
         self.objetos_tri = []
         for obj in self.objetos_estaticos:
@@ -396,12 +374,14 @@ class Labirinto3D:
                 'escala': escala
             })
 
+    # Verifica se a célula é livre
     def ehCelulaLivre(self, x, y):
         if x < 0 or x >= self.mapa_largura or y < 0 or y >= self.mapa_altura:
             return False
         celula = self.mapa[int(y)][int(x)]
         return celula in [1, 2, 3]
 
+    # Verifica colisão do jogador
     def verificarColisao(self, pos_x, pos_z):
         pontos = [
             (pos_x, pos_z),
@@ -424,6 +404,7 @@ class Labirinto3D:
                 return True
         return False
     
+    # Atualiza posição e energia do jogador
     def atualizarMovimento(self, dt):
         if dt <= 0:
             return
@@ -442,6 +423,7 @@ class Labirinto3D:
             self.posicao_jogador[0] = nova_x
             self.posicao_jogador[2] = nova_z
 
+    # Desenha o piso com texturas
     def desenharPisoComTexturas(self):
         glEnable(GL_TEXTURE_2D)
         glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE)
@@ -467,35 +449,36 @@ class Labirinto3D:
                 glEnd()
         glDisable(GL_TEXTURE_2D)
 
-    def desenharParede(self, x, z, altura, espessura, face_norte=True, face_sul=True,
-                       face_leste=True, face_oeste=True):
+    # Desenha uma parede
+    def desenharParede(self, x, z, altura, espessura, cima=True, baixo=True,
+                       direita=True, esquerda=True):
         cx = x + 0.5
         cz = z + 0.5
         tamanho = self.TAMANHO_CELULA
         esp = espessura / 2
         glColor3f(0.7, 0.7, 0.7)
-        if face_norte:
+        if cima:
             glBegin(GL_QUADS)
             glVertex3f(cx - tamanho/2, 0, cz - tamanho/2)
             glVertex3f(cx + tamanho/2, 0, cz - tamanho/2)
             glVertex3f(cx + tamanho/2, altura, cz - tamanho/2)
             glVertex3f(cx - tamanho/2, altura, cz - tamanho/2)
             glEnd()
-        if face_sul:
+        if baixo:
             glBegin(GL_QUADS)
             glVertex3f(cx + tamanho/2, 0, cz + tamanho/2)
             glVertex3f(cx - tamanho/2, 0, cz + tamanho/2)
             glVertex3f(cx - tamanho/2, altura, cz + tamanho/2)
             glVertex3f(cx + tamanho/2, altura, cz + tamanho/2)
             glEnd()
-        if face_oeste:
+        if esquerda:
             glBegin(GL_QUADS)
             glVertex3f(cx - tamanho/2, 0, cz + tamanho/2)
             glVertex3f(cx - tamanho/2, 0, cz - tamanho/2)
             glVertex3f(cx - tamanho/2, altura, cz - tamanho/2)
             glVertex3f(cx - tamanho/2, altura, cz + tamanho/2)
             glEnd()
-        if face_leste:
+        if direita:
             glBegin(GL_QUADS)
             glVertex3f(cx + tamanho/2, 0, cz - tamanho/2)
             glVertex3f(cx + tamanho/2, 0, cz + tamanho/2)
@@ -503,6 +486,7 @@ class Labirinto3D:
             glVertex3f(cx + tamanho/2, altura, cz - tamanho/2)
             glEnd()
 
+    # Desenha o labirinto
     def desenharLabirinto(self):
         self.desenharPisoComTexturas()
         for y in range(self.mapa_altura):
@@ -520,6 +504,7 @@ class Labirinto3D:
         for inimigo in self.inimigos:
             self.desenharInimigo(inimigo)
 
+    # Desenha inimigo (esfera vermelha)
     def desenharInimigo(self, inimigo):
         glPushMatrix()
         glTranslatef(inimigo['x'], inimigo['y'] + 0.5, inimigo['z'])
@@ -528,14 +513,16 @@ class Labirinto3D:
         gluSphere(quad, 0.4, 16, 16)
         glPopMatrix()
 
+    # Desenha cápsula (esfera verde)
     def desenharCapsula(self, cap):
         glPushMatrix()
-        glTranslatef(cap['x'], cap['y'] + 0.2, cap['z'])
+        glTranslatef(cap['x'], cap['y'] + 0.6, cap['z'])
         glColor3f(0.0, 1.0, 0.0)
         quad = gluNewQuadric()
-        gluSphere(quad, 0.2, 12, 12)
+        gluSphere(quad, 0.4, 10, 12)
         glPopMatrix()
 
+    # Movimenta inimigos em direção ao jogador
     def atualizarInimigos(self, dt):
         for inimigo in self.inimigos:
             dx = self.posicao_jogador[0] - inimigo['x']
@@ -562,6 +549,7 @@ class Labirinto3D:
                     elif self.ehCelulaLivre(int(inimigo['x']), int(novo_z)):
                         inimigo['z'] = novo_z
 
+    # Desenha uma janela
     def desenharJanela(self, x, y, altura_janela):
         cx = x + 0.5
         cz = y + 0.5
@@ -577,6 +565,7 @@ class Labirinto3D:
         glVertex3f(cx - tamanho/2, base + h, cz - tamanho/2 + esp)
         glEnd()
 
+    # Desenha uma porta
     def desenharPorta(self, x, y, altura_porta):
         cx = x + 0.5
         cz = y + 0.5
@@ -609,6 +598,7 @@ class Labirinto3D:
         glVertex3f(cx - tamanho/2 + esp, h, cz + tamanho/2)
         glEnd()
 
+    # Desenha o jogador (boneco)
     def desenharJogador(self):
         glPushMatrix()
         glTranslatef(self.posicao_jogador[0], self.posicao_jogador[1] - 1.0 , self.posicao_jogador[2])
@@ -640,7 +630,7 @@ class Labirinto3D:
         glColor3f(0.2, 0.6, 0.9)           
         gluCylinder(quad, 0.32, 0.28, 0.7, 16, 4)
         glPopMatrix()
-        #  Cabeça 
+        # Cabeça 
         glPushMatrix()
         glTranslatef(0.0, 1.6, 0.0)
         glColor3f(1.0, 0.85, 0.7)          
@@ -676,6 +666,7 @@ class Labirinto3D:
         glPopMatrix()
         glPopMatrix()
 
+    # Configura a perspectiva e a câmera
     def configurarPerspectiva(self):
         glMatrixMode(GL_PROJECTION)
         glLoadIdentity()
@@ -704,6 +695,7 @@ class Labirinto3D:
                 gluLookAt(centro_x, 80, centro_z + 5,
                           centro_x, 0, centro_z, 0, 1, 0)
 
+    # Desenha um modelo TRI
     def desenharModeloTRI(self, obj_tri):
         nome_modelo = obj_tri['modelo']
         if nome_modelo not in self.modelos_tri:
@@ -723,9 +715,8 @@ class Labirinto3D:
         glEnd()
         glPopMatrix()
 
-    # ---------- HUD: sem pygame, usando glutBitmapCharacter ----------
+    # Desenha o HUD (Energia e Pontos)
     def desenharHUD(self):
-        # Projeção ortográfica para HUD
         glMatrixMode(GL_PROJECTION)
         glPushMatrix()
         glLoadIdentity()
@@ -735,7 +726,6 @@ class Labirinto3D:
         glLoadIdentity()
         glDisable(GL_DEPTH_TEST)
 
-        # barra de energia (retângulo)
         barra_x = 10
         barra_y = 5
         barra_larg = 200
@@ -759,12 +749,11 @@ class Labirinto3D:
         glVertex2f(barra_x + 2, barra_y + barra_alt - 2)
         glEnd()
 
-        # Texto usando GLUT bitmap
         texto = f"Energia: {int(self.energia)}  Pontos: {self.pontos}"
         glColor3f(1.0, 1.0, 1.0)
-        glRasterPos2i(10, 40)  # posição do texto
+        glRasterPos2i(10, 40)  
         for ch in texto:
-            glutBitmapCharacter(GLUT_BITMAP_HELVETICA_18, ord(ch))
+            glutBitmapCharacter(GLUT_BITMAP_9_BY_15, ord(ch))
 
         glEnable(GL_DEPTH_TEST)
         glPopMatrix()
@@ -772,7 +761,7 @@ class Labirinto3D:
         glPopMatrix()
         glMatrixMode(GL_MODELVIEW)
 
-    # ---------- Loop principal GLUT ----------
+    # Loop principal: atualiza e desenha
     def loopPrincipal(self):
         tempo_atual = time.time()
         dt = tempo_atual - self.tempo_anterior
@@ -794,15 +783,13 @@ class Labirinto3D:
 
         glutSwapBuffers()
 
-    def executar(self):
-        print("\n=== LABIRINTO 3D (GLUT) ===")
-        print("Controles: BARRA - Avançar | ESQ/DIR - Girar | 1/2/3 - Câmera | ESC - Sair")
-        glutMainLoop()
-
-# ---------- Função main ----------
+        
 def main():
+    # Inicializa o jogo e o loop principal GLUT
     jogo = Labirinto3D()
-    jogo.executar()
+    print("\n=== LABIRINTO 3D (GLUT) ===")
+    print("Controles: BARRA - Avançar | ESQ/DIR - Girar | 1/2/3 - Câmera | ESC - Sair")
+    glutMainLoop()
 
 if __name__ == "__main__":
     main()
