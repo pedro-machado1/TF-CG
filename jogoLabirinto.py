@@ -25,15 +25,8 @@ class Labirinto3D:
         glEnable(GL_DEPTH_TEST)
         glClearColor(0.1, 0.1, 0.15, 1.0)
 
-        # Definições de tamanho do mundo
-        self.TAMANHO_CELULA = 1.0
-        self.ALTURA_PAREDE = 2.7
-        self.ESPESSURA_PAREDE = 0.25
-        self.ALTURA_JANELA = 1.0
-        self.ALTURA_PORTA = 2.1
-        self.ALTURA_BASE_JANELA = 0.9
-
         # Estado do mundo e objetos
+        self.TAMANHO_CELULA = 1.0
         self.mapa = []
         self.mapa_largura = 0
         self.mapa_altura = 0
@@ -341,10 +334,10 @@ class Labirinto3D:
                     elif tipo_celula in (1, 2):
                         linha_mapa.append(tipo_celula)
                     elif tipo_celula == 4:
-                        self.janelas.append({'x': x, 'y': y, 'altura': self.ALTURA_JANELA})
+                        self.janelas.append({'x': x, 'y': y, 'altura': 1.0})
                         linha_mapa.append(1)
                     elif tipo_celula == 5:
-                        self.portas.append({'x': x, 'y': y, 'altura': self.ALTURA_PORTA})
+                        self.portas.append({'x': x, 'y': y, 'altura': 2.1})
                         linha_mapa.append(1)
                     elif tipo_celula == 6:
                         modelo = None
@@ -437,6 +430,9 @@ class Labirinto3D:
 
     # Desenha o piso com texturas
     def desenharPisoComTexturas(self):
+
+        glPolygonOffset(1.0, 1.0)
+    
         glEnable(GL_TEXTURE_2D)
         glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE)
         for y in range(self.mapa_altura):
@@ -454,49 +450,58 @@ class Labirinto3D:
                 cz = y + 0.5
                 tamanho = self.TAMANHO_CELULA / 2.0
                 glBegin(GL_QUADS)
-                glTexCoord2f(0.0, 0.0); glVertex3f(cx - tamanho, 0.01, cz - tamanho)
-                glTexCoord2f(1.0, 0.0); glVertex3f(cx + tamanho, 0.01, cz - tamanho)
-                glTexCoord2f(1.0, 1.0); glVertex3f(cx + tamanho, 0.01, cz + tamanho)
-                glTexCoord2f(0.0, 1.0); glVertex3f(cx - tamanho, 0.01, cz + tamanho)
+                glTexCoord2f(0.0, 0.0); glVertex3f(cx - tamanho, 0.00, cz - tamanho)
+                glTexCoord2f(1.0, 0.0); glVertex3f(cx + tamanho, 0.00, cz - tamanho)
+                glTexCoord2f(1.0, 1.0); glVertex3f(cx + tamanho, 0.00, cz + tamanho)
+                glTexCoord2f(0.0, 1.0); glVertex3f(cx - tamanho, 0.00, cz + tamanho)
                 glEnd()
         glDisable(GL_TEXTURE_2D)
 
-    # Desenha uma parede
-    def desenharParede(self, x, z, altura, espessura, cima=True, baixo=True,
-                       direita=True, esquerda=True):
+    def desenharParede(self, x, z, altura, espessura, face_norte=True, face_sul=True,
+                       face_leste=True, face_oeste=True):
         cx = x + 0.5
         cz = z + 0.5
         tamanho = self.TAMANHO_CELULA
         esp = espessura / 2
         glColor3f(0.7, 0.7, 0.7)
-        if cima:
+        
+        # Lados verticais (código existente)
+        if face_norte:
             glBegin(GL_QUADS)
             glVertex3f(cx - tamanho/2, 0, cz - tamanho/2)
             glVertex3f(cx + tamanho/2, 0, cz - tamanho/2)
             glVertex3f(cx + tamanho/2, altura, cz - tamanho/2)
             glVertex3f(cx - tamanho/2, altura, cz - tamanho/2)
             glEnd()
-        if baixo:
+        if face_sul:
             glBegin(GL_QUADS)
             glVertex3f(cx + tamanho/2, 0, cz + tamanho/2)
             glVertex3f(cx - tamanho/2, 0, cz + tamanho/2)
             glVertex3f(cx - tamanho/2, altura, cz + tamanho/2)
             glVertex3f(cx + tamanho/2, altura, cz + tamanho/2)
             glEnd()
-        if esquerda:
+        if face_oeste:
             glBegin(GL_QUADS)
             glVertex3f(cx - tamanho/2, 0, cz + tamanho/2)
             glVertex3f(cx - tamanho/2, 0, cz - tamanho/2)
             glVertex3f(cx - tamanho/2, altura, cz - tamanho/2)
             glVertex3f(cx - tamanho/2, altura, cz + tamanho/2)
             glEnd()
-        if direita:
+        if face_leste:
             glBegin(GL_QUADS)
             glVertex3f(cx + tamanho/2, 0, cz - tamanho/2)
             glVertex3f(cx + tamanho/2, 0, cz + tamanho/2)
             glVertex3f(cx + tamanho/2, altura, cz + tamanho/2)
             glVertex3f(cx + tamanho/2, altura, cz - tamanho/2)
             glEnd()
+
+        # NOVO: Desenha a face superior (o topo da parede)
+        glBegin(GL_QUADS)
+        glVertex3f(cx - tamanho/2, altura, cz - tamanho/2)
+        glVertex3f(cx + tamanho/2, altura, cz - tamanho/2)
+        glVertex3f(cx + tamanho/2, altura, cz + tamanho/2)
+        glVertex3f(cx - tamanho/2, altura, cz + tamanho/2)
+        glEnd()
 
     # Desenha o labirinto
     def desenharLabirinto(self):
@@ -504,7 +509,9 @@ class Labirinto3D:
         for y in range(self.mapa_altura):
             for x in range(self.mapa_largura):
                 if self.mapa[y][x] == 0:
-                    self.desenharParede(x, y, self.ALTURA_PAREDE, self.ESPESSURA_PAREDE)
+                    glEnable(GL_TEXTURE_2D)
+                    self.desenharParede(x, y, 2.7, 0.25)
+                    glDisable(GL_TEXTURE_2D)
         for janela in self.janelas:
             self.desenharJanela(janela['x'], janela['y'], janela['altura'])
         for porta in self.portas:
@@ -566,8 +573,8 @@ class Labirinto3D:
         cx = x + 0.5
         cz = y + 0.5
         tamanho = self.TAMANHO_CELULA
-        esp = self.ESPESSURA_PAREDE / 2
-        base = self.ALTURA_BASE_JANELA
+        esp = 0.25 / 2
+        base = 0.9
         h = altura_janela
         glColor3f(0.2, 0.7, 1.0)
         glBegin(GL_QUADS)
@@ -582,7 +589,7 @@ class Labirinto3D:
         cx = x + 0.5
         cz = y + 0.5
         tamanho = self.TAMANHO_CELULA
-        esp = self.ESPESSURA_PAREDE / 2
+        esp = 0.25 / 2
         h = altura_porta
         glColor3f(0.7, 0.5, 0.2)
         
@@ -692,7 +699,7 @@ class Labirinto3D:
     def configurarPerspectiva(self):
         glMatrixMode(GL_PROJECTION)
         glLoadIdentity()
-        gluPerspective(45, (self.largura / self.altura), 0.1, 500.0)
+        gluPerspective(45, (self.largura / self.altura), 5.0, 2000.0)
         glMatrixMode(GL_MODELVIEW)
         glLoadIdentity()
 
@@ -715,8 +722,11 @@ class Labirinto3D:
             else:
                 centro_x = self.mapa_largura / 2
                 centro_z = self.mapa_altura / 2
-                gluLookAt(centro_x, 80, centro_z + 5,
-                          centro_x, 0, centro_z, 0, 1, 0)
+                gluLookAt(centro_x, 80, centro_z,
+          centro_x, 0, centro_z,
+          0, 0, -1)
+
+
 
     # Desenha um modelo TRI
     def desenharModeloTRI(self, obj_tri):
