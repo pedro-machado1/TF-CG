@@ -105,8 +105,8 @@ class Labirinto3D:
         self.carregarMapa("mapa_labirinto_texturas.txt")
         self.carregarTexturasPiso()
         
-        # Carregar imagem de colisão
-        self.carregarImagemMapaColisao("mapa_labirinto.txt")
+        self.imagem_colisao = None
+        self.dados_colisao = None
 
        
         # instancia inimigos/cápsulas
@@ -227,48 +227,15 @@ class Labirinto3D:
             
             self.texturas_piso[tipo_id] = textura_id
 
-    def carregarImagemMapaColisao(self, nome_arquivo):
-
-        # Se for um TXT → automaticamente usa o mapa textual
-        if nome_arquivo.lower().endswith(".txt"):
-            self.imagem_colisao = None
-            self.dados_colisao = None
-            return
-
     def ehPassavel(self, pos_x, pos_z):
-        
-        # Primeiro, verifica limites do mapa
-        celula_x = int(pos_x)
-        celula_z = int(pos_z)
-        
-        if celula_x < 0 or celula_x >= self.mapa_largura or celula_z < 0 or celula_z >= self.mapa_altura:
-            return False
-        
-        # Se temos uma imagem de colisão com dados
-        if self.dados_colisao is not None:
-            # Mapear posição 3D para pixel na imagem
-            img_height, img_width = self.dados_colisao.shape[:2]
-            
-            # Normalizar coordenadas para tamanho da imagem
-            pixel_x = int((pos_x / self.mapa_largura) * img_width)
-            pixel_z = int((pos_z / self.mapa_altura) * img_height)
-            
-            # Limpar limites de pixel
-            pixel_x = max(0, min(pixel_x, img_width - 1))
-            pixel_z = max(0, min(pixel_z, img_height - 1))
-            
-            # Verificar alfa (opacidade) - 0 = não passável, 255 = passável
-            alpha = self.dados_colisao[pixel_z, pixel_x, 3]
-            return alpha > 128  # Se opacidade > 50%, é passável
-        
-        # Fallback: usar o mapa de células
-        return self.ehCelulaLivre(celula_x, celula_z)
+        if int(pos_x) < 0 or int(pos_x) >= self.mapa_largura or int(pos_z) < 0 or int(pos_z) >= self.mapa_altura:
+            return False        
+        return self.ehCelulaLivre(int(pos_x), int(pos_z))
 
     def carregarModeloTRI(self, caminho_arquivo, nome_modelo):
-        """Carrega um modelo TRI (formato de triângulos) do arquivo"""
         try:
             if not os.path.exists(caminho_arquivo):
-                print(f"[ERRO] Arquivo TRI não encontrado: {caminho_arquivo}")
+                print(f"Arquivo TRI não encontrado: {caminho_arquivo}")
                 return False
             
             triangulos = []
@@ -278,7 +245,6 @@ class Labirinto3D:
                     if not linha:
                         continue
                     
-                    # Cada linha contém: x1 y1 z1  x2 y2 z2  x3 y3 z3  cor
                     partes = linha.split()
                     if len(partes) < 10:
                         continue
@@ -289,7 +255,7 @@ class Labirinto3D:
                         v2 = [float(partes[3]), float(partes[4]), float(partes[5])]
                         v3 = [float(partes[6]), float(partes[7]), float(partes[8])]
                         
-                        # Ler cor (em hex)
+                        # Ler cor 
                         cor_hex = partes[9] if len(partes) > 9 else "0xFFFFFF"
                         cor_int = int(cor_hex, 16)
                         r = ((cor_int >> 16) & 0xFF) / 255.0
@@ -304,35 +270,27 @@ class Labirinto3D:
                         continue
             
             self.modelos_tri[nome_modelo] = triangulos
-            print(f"[OK] Modelo TRI carregado: {nome_modelo} ({len(triangulos)} triângulos)")
             return True
             
         except Exception as e:
-            print(f"[ERRO] Falha ao carregar modelo TRI: {e}")
+            print(f"Falha ao carregar modelo TRI: {e}")
             return False
 
     def reposicionarCapsula(self, indice):
         avoid = set()
 
-        # evitar jogador
         jogador_cel = (int(self.posicao_jogador[0]), int(self.posicao_jogador[2]))
         avoid.add(jogador_cel)
 
-        # evitar outras cápsulas
         for c in self.capsulas:
             avoid.add((int(c['x']), int(c['z'])))
-
-        # evitar inimigos
         for inim in self.inimigos:
             avoid.add((int(inim['x']), int(inim['z'])))
 
-        # CHAMADA CORRETA
         cel = self.escolherCelulaLivreAleatoria(avoid_positions=avoid)
-
         if cel is None:
             return
 
-        # reposiciona cápsula
         self.capsulas[indice]['x'] = cel[0] + 0.5
         self.capsulas[indice]['z'] = cel[1] + 0.5
 
@@ -344,7 +302,6 @@ class Labirinto3D:
 
         for c in self.capsulas:
             avoid.add((int(c['x']), int(c['z'])))
-
         for inim in self.inimigos:
             avoid.add((int(inim['x']), int(inim['z'])))
 
@@ -352,7 +309,6 @@ class Labirinto3D:
 
         if cel is None:
             return
-
         inimigo['x'] = cel[0] + 0.5
         inimigo['z'] = cel[1] + 0.5
 
@@ -467,7 +423,6 @@ class Labirinto3D:
             })
 
     
-    # --------------------- colisões / movimentos / desenho (restante) ---------------------
     def ehCelulaLivre(self, x, y):
         # Verifica se as coordenadas estão dentro dos limites do mapa
         if x < 0 or x >= self.mapa_largura or y < 0 or y >= self.mapa_altura:
@@ -484,22 +439,19 @@ class Labirinto3D:
             (pos_x, pos_z + raio_colisao),
             (pos_x, pos_z - raio_colisao),
         ]
-        for px, pz in pontos:
-            celula_x = int(px)
-            celula_z = int(pz)
-            
+        for px, pz in pontos:            
             # 1. Verificar se há uma JANELA nesta célula (bloqueia)
-            eh_janela = any(janela['x'] == celula_x and janela['y'] == celula_z for janela in self.janelas)
+            eh_janela = any(janela['x'] == int(px) and janela['y'] == int(pz) for janela in self.janelas)
             if eh_janela:
                 return True
 
             # 2. Verificar se há um OBJETO ESTÁTICO nesta célula (bloqueia)
-            eh_objeto = any(obj['x'] == celula_x and obj['y'] == celula_z for obj in self.objetos_estaticos)
+            eh_objeto = any(obj['x'] == int(px) and obj['y'] == int(pz) for obj in self.objetos_estaticos)
             if eh_objeto:
                 return True
             
             # 3. Verificar se há uma PORTA nesta célula (passável)
-            eh_porta = any(porta['x'] == celula_x and porta['y'] == celula_z for porta in self.portas)
+            eh_porta = any(porta['x'] == int(px) and porta['y'] == int(pz) for porta in self.portas)
             if eh_porta:
                 continue
             
