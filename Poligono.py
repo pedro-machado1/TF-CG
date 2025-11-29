@@ -8,7 +8,6 @@ from Ponto import Ponto
 
 class Poligono:
     def __init__(self):
-        # vetor oficial de vértices
         self.Vertices = []
         self.color = (1.0, 1.0, 1.0)
 
@@ -43,7 +42,6 @@ class Poligono:
             glVertex3f(v.x, v.y, v.z)
         glEnd()
 
-    # --- MÉTODO USADO PELO SEU LABIRINTO ---
     def draw(self):
         """Desenho compatível com o código do Labirinto."""
         glColor3f(*self.color)

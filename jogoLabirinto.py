@@ -47,9 +47,18 @@ class Labirinto3D:
         self.texturas_piso = {}  
         self.mapa_tipos_piso = []  
         self.nomes_texturas = {
-            0: 'CROSS.png', 1: 'DL.png', 2: 'DLR.png', 3: 'DR.png', 4: 'LR.png', 
-            5: 'None.png', 6: 'UD.png', 7: 'UDL.png', 8: 'UDR.png', 9: 'UL.png', 
-            10: 'ULR.png', 11: 'UR.png'
+            0: 'CROSS.png',
+            1: 'DL.png',
+            2: 'DLR.png',
+            3: 'DR.png', 
+            4: 'LR.png', 
+            5: 'None.png',
+            6: 'UD.png',
+            7: 'UDL.png',
+            8: 'UDR.png', 
+            9: 'UL.png', 
+            10: 'ULR.png', 
+            11: 'UR.png'
         }
         
         # Estado do jogador
@@ -61,7 +70,7 @@ class Labirinto3D:
         self.escalas_modelos = {
             'barrel': 0.01, 'well': 0.007, 'dead_tree_d': 0.005, 'pine_c': 0.004, 
             'fountain_b': 0.0015, 'fire_cage': 0.015, 'box': 0.007, 'fence': 0.01, 
-            'street_oil_light': 0.01
+            'street_oil_light': 0.01 , "tent_a": 0.005
         }
 
         # Carrega modelos 3D
@@ -74,13 +83,14 @@ class Labirinto3D:
         self.carregarModeloTRI('TRI/box.tri', 'box')
         self.carregarModeloTRI('TRI/fence.tri', 'fence')
         self.carregarModeloTRI('TRI/street_oil_light.tri', 'street_oil_light')
+        self.carregarModeloTRI('TRI/tent_a.tri', 'tent_a')
 
         # Carrega mapa e texturas
         self.carregarMapa("mapa_labirinto_texturas.txt")
         self.carregarTexturasPiso()
         
         # Instancia elementos dinâmicos
-        self.instanciarInimigos(1)
+        self.instanciarInimigos(10)
         self.instanciarCapsulas(10)
 
         # Controles e câmera
@@ -160,7 +170,7 @@ class Labirinto3D:
         jogador_cel = (int(self.posicao_jogador[0]), int(self.posicao_jogador[2]))
         for y in range(self.mapa_altura):
             for x in range(self.mapa_largura):
-                if self.ehCelulaLivre(x, y) and (x, y) != jogador_cel:
+                if self.livre(x, y) and (x, y) != jogador_cel:
                     livres.append((x, y))
         caps = set((int(c['x']), int(c['z'])) for c in self.capsulas)
         livres = [p for p in livres if p not in caps]
@@ -179,7 +189,7 @@ class Labirinto3D:
             livres = []
             for y in range(self.mapa_altura):
                 for x in range(self.mapa_largura):
-                    if self.ehCelulaLivre(x, y):
+                    if self.livre(x, y):
                         if avoid_positions and (x, y) in avoid_positions:
                             continue
                         livres.append((x, y))
@@ -228,7 +238,7 @@ class Labirinto3D:
     def ehPassavel(self, pos_x, pos_z):
         if int(pos_x) < 0 or int(pos_x) >= self.mapa_largura or int(pos_z) < 0 or int(pos_z) >= self.mapa_altura:
             return False        
-        return self.ehCelulaLivre(int(pos_x), int(pos_z))
+        return self.livre(int(pos_x), int(pos_z))
 
     # Carrega modelo TRI
     def carregarModeloTRI(self, caminho_arquivo, nome_modelo):
@@ -308,6 +318,7 @@ class Labirinto3D:
                 while "  " in linha:
                     linha = linha.replace("  ", " ")
                 return linha.strip()
+            
             for y in range(self.mapa_altura):
                 linha_raw = normalizar(linhas[y + 1])
                 tokens = linha_raw.split(" ")
@@ -352,16 +363,17 @@ class Labirinto3D:
                     else:
                         linha_mapa.append(tipo_celula)
                     linha_texturas.append(tipo_textura)
+
                 self.mapa.append(linha_mapa)
                 self.mapa_tipos_piso.append(linha_texturas)
             print(f"Mapa carregado: {self.mapa_largura}x{self.mapa_altura}")
-            self.converterObjetosEstaticosParaTRI()
+            self.converterTRI()
         except Exception as e:
             print(f"Erro ao carregar mapa: {e}")
             raise
 
     # Converte objetos estáticos para renderização TRI
-    def converterObjetosEstaticosParaTRI(self):
+    def converterTRI(self):
         self.objetos_tri = []
         for obj in self.objetos_estaticos:
             modelo = obj['tipo']
@@ -375,7 +387,7 @@ class Labirinto3D:
             })
 
     # Verifica se a célula é livre
-    def ehCelulaLivre(self, x, y):
+    def livre(self, x, y):
         if x < 0 or x >= self.mapa_largura or y < 0 or y >= self.mapa_altura:
             return False
         celula = self.mapa[int(y)][int(x)]
@@ -429,7 +441,7 @@ class Labirinto3D:
         glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE)
         for y in range(self.mapa_altura):
             for x in range(self.mapa_largura):
-                if not self.ehCelulaLivre(x, y):
+                if not self.livre(x, y):
                     continue
                 tipo_texto = self.mapa_tipos_piso[y][x] if y < len(self.mapa_tipos_piso) and x < len(self.mapa_tipos_piso[y]) else 5
                 textura_id = self.texturas_piso.get(tipo_texto, None)
@@ -504,7 +516,7 @@ class Labirinto3D:
         for inimigo in self.inimigos:
             self.desenharInimigo(inimigo)
 
-    # Desenha inimigo (esfera vermelha)
+    # Desenha inimigo 
     def desenharInimigo(self, inimigo):
         glPushMatrix()
         glTranslatef(inimigo['x'], inimigo['y'] + 0.5, inimigo['z'])
@@ -513,7 +525,7 @@ class Labirinto3D:
         gluSphere(quad, 0.4, 16, 16)
         glPopMatrix()
 
-    # Desenha cápsula (esfera verde)
+    # Desenha cápsula 
     def desenharCapsula(self, cap):
         glPushMatrix()
         glTranslatef(cap['x'], cap['y'] + 0.6, cap['z'])
@@ -540,13 +552,13 @@ class Labirinto3D:
                 dir_z = dz / dist
                 novo_x = inimigo['x'] + dir_x * 20.0 * dt
                 novo_z = inimigo['z'] + dir_z * 20.0 * dt
-                if self.ehCelulaLivre(int(novo_x), int(novo_z)):
+                if self.livre(int(novo_x), int(novo_z)):
                     inimigo['x'] = novo_x
                     inimigo['z'] = novo_z
                 else:
-                    if self.ehCelulaLivre(int(novo_x), int(inimigo['z'])):
+                    if self.livre(int(novo_x), int(inimigo['z'])):
                         inimigo['x'] = novo_x
-                    elif self.ehCelulaLivre(int(inimigo['x']), int(novo_z)):
+                    elif self.livre(int(inimigo['x']), int(novo_z)):
                         inimigo['z'] = novo_z
 
     # Desenha uma janela
@@ -573,24 +585,28 @@ class Labirinto3D:
         esp = self.ESPESSURA_PAREDE / 2
         h = altura_porta
         glColor3f(0.7, 0.5, 0.2)
+        
         glBegin(GL_QUADS)
         glVertex3f(cx - tamanho/2, 0, cz - tamanho/2 + esp)
         glVertex3f(cx + tamanho/2, 0, cz - tamanho/2 + esp)
         glVertex3f(cx + tamanho/2, h, cz - tamanho/2 + esp)
         glVertex3f(cx - tamanho/2, h, cz - tamanho/2 + esp)
         glEnd()
+        
         glBegin(GL_QUADS)
         glVertex3f(cx + tamanho/2, 0, cz + tamanho/2 - esp)
         glVertex3f(cx - tamanho/2, 0, cz + tamanho/2 - esp)
         glVertex3f(cx - tamanho/2, h, cz + tamanho/2 - esp)
         glVertex3f(cx + tamanho/2, h, cz + tamanho/2 - esp)
         glEnd()
+        
         glBegin(GL_QUADS)
         glVertex3f(cx + tamanho/2 - esp, 0, cz - tamanho/2)
         glVertex3f(cx + tamanho/2 - esp, 0, cz + tamanho/2)
         glVertex3f(cx + tamanho/2 - esp, h, cz + tamanho/2)
         glVertex3f(cx + tamanho/2 - esp, h, cz - tamanho/2)
         glEnd()
+
         glBegin(GL_QUADS)
         glVertex3f(cx - tamanho/2 + esp, 0, cz + tamanho/2)
         glVertex3f(cx - tamanho/2 + esp, 0, cz - tamanho/2)
@@ -605,6 +621,7 @@ class Labirinto3D:
         glRotatef(self.angulo_rotacao, 0, 1, 0)
         quad = gluNewQuadric()
         gluQuadricNormals(quad, GLU_SMOOTH)
+
         # Perna esquerda
         glPushMatrix()
         glTranslatef(-0.18, 0.3, 0.0)      
@@ -614,6 +631,7 @@ class Labirinto3D:
         glTranslatef(0.0, 0.0, 0.55)
         gluSphere(quad, 0.10, 10, 8)       
         glPopMatrix()
+
         # Perna direita 
         glPushMatrix()
         glTranslatef(0.18, 0.3, 0.0)
@@ -623,6 +641,7 @@ class Labirinto3D:
         glTranslatef(0.0, 0.0, 0.55)
         gluSphere(quad, 0.10, 10, 8)
         glPopMatrix()
+        
         # Tronco  
         glPushMatrix()
         glTranslatef(0.0, 0.8, 0.0)
@@ -630,6 +649,7 @@ class Labirinto3D:
         glColor3f(0.2, 0.6, 0.9)           
         gluCylinder(quad, 0.32, 0.28, 0.7, 16, 4)
         glPopMatrix()
+
         # Cabeça 
         glPushMatrix()
         glTranslatef(0.0, 1.6, 0.0)
@@ -646,6 +666,7 @@ class Labirinto3D:
         gluSphere(quad, 0.04, 8, 8)
         glPopMatrix()
         glPopMatrix()  
+
         # Braço esquerdo
         glPushMatrix()
         glTranslatef(-0.42, 1.05, 0.0)
@@ -655,6 +676,7 @@ class Labirinto3D:
         glTranslatef(0.0, 0.0, 0.45)
         gluSphere(quad, 0.06, 8, 6)
         glPopMatrix()
+
         # Braço direito
         glPushMatrix()
         glTranslatef(0.42, 1.05, 0.0)
@@ -673,6 +695,7 @@ class Labirinto3D:
         gluPerspective(45, (self.largura / self.altura), 0.1, 500.0)
         glMatrixMode(GL_MODELVIEW)
         glLoadIdentity()
+
         if self.modo_camera == 0:
             camera_x = self.posicao_jogador[0]
             camera_y = self.posicao_jogador[1] + 1.5
@@ -704,6 +727,7 @@ class Labirinto3D:
         glPushMatrix()
         glTranslatef(obj_tri['x'], obj_tri['y'], obj_tri['z'])
         glScalef(obj_tri['escala'], obj_tri['escala'], obj_tri['escala'])
+
         glBegin(GL_TRIANGLES)
         for tri in triangulos:
             glColor3f(*tri['cor'])
@@ -742,6 +766,7 @@ class Labirinto3D:
         glVertex2f(barra_x, barra_y + barra_alt)
         glEnd()
         glColor3f(0.0, 1.0, 0.0)
+
         glBegin(GL_QUADS)
         glVertex2f(barra_x + 2, barra_y + 2)
         glVertex2f(barra_x + 2 + (barra_larg - 4) * frac, barra_y + 2)
